@@ -36,6 +36,7 @@ adjusttext = "^1.3.0"
 google-auth-httplib2 = "^0.2.0"
 google-auth-oauthlib = "^1.2.2"
 pytz = "^2025.2"
+pymongo = "^4.12.1"
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^3.3.2"

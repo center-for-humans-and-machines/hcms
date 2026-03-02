@@ -11,6 +11,7 @@ from hpms.monitoring.processors.rate_conversation import (
     RateConversationsProcessor,
     RateMessagesProcessor,
 )
+from hpms.monitoring.realtime_watcher import RealtimeConversationWatcher
 
 __all__ = [
     "create_client",
@@ -20,4 +21,5 @@ __all__ = [
     "RegTestProcessor",
     "RateConversationsProcessor",
     "RateMessagesProcessor",
+    "RealtimeConversationWatcher",
 ]
