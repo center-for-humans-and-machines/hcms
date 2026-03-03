@@ -158,7 +158,7 @@ Responsibilities:
 
 ### 4) Runtime entrypoint
 Add script:
-- `watch_mongo_conversations.py`
+- `hpms/monitoring/watch_mongo_conversations.py`
 
 Responsibilities:
 - Read env config.
@@ -225,5 +225,5 @@ Input: string from `_rate_text_with_llama_guard`.
 - `hpms/database/models.py`: add canonical Mongo document models.
 - `hpms/database/repository.py`: add DB read/write methods.
 - `hpms/monitoring/realtime_watcher.py`: add backfill + change stream processing.
-- `watch_mongo_conversations.py`: add executable runner.
+- `hpms/monitoring/watch_mongo_conversations.py`: add module entrypoint runner.
 - `tests/`: add watcher/repository normalization and idempotency tests.

@@ -38,7 +38,7 @@ Add a dedicated watcher image build definition:
 - `Dockerfile.monitoring`
   - based on `python:3.13-slim`
   - installs Poetry and project dependencies
-  - runs `poetry run python watch_mongo_conversations.py`
+  - runs `python -m hpms.monitoring.watch_mongo_conversations`
 
 Add explicit lifecycle scripts:
 
