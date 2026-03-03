@@ -217,69 +217,134 @@ class MongoConversationRepository:
             "category_other": category_other,
         }
 
-        # Atomically update or append one provider entry within reviewer_flags.
-        reviewer_flags_path = f"messages.{message_index}.reviewer_flags"
-        existing_flags_path = f"$messages.{message_index}.reviewer_flags"
-
         self.collection.update_one(
             {
                 "_id": conversation_id,
                 f"messages.{message_index}": {"$exists": True},
             },
-            [
-                {
-                    "$set": {
-                        reviewer_flags_path: {
-                            "$let": {
-                                "vars": {
-                                    "existing_flags": {
-                                        "$ifNull": [existing_flags_path, []]
-                                    },
-                                    "new_flag": reviewer_flag,
-                                },
-                                "in": {
-                                    "$cond": [
-                                        {
-                                            "$in": [
-                                                reviewer_id,
-                                                {
-                                                    "$map": {
-                                                        "input": "$$existing_flags",
-                                                        "as": "flag",
-                                                        "in": "$$flag.reviewer_id",
-                                                    }
-                                                },
-                                            ]
-                                        },
-                                        {
-                                            "$map": {
-                                                "input": "$$existing_flags",
-                                                "as": "flag",
-                                                "in": {
-                                                    "$cond": [
-                                                        {
-                                                            "$eq": [
-                                                                "$$flag.reviewer_id",
-                                                                reviewer_id,
-                                                            ]
-                                                        },
-                                                        "$$new_flag",
-                                                        "$$flag",
-                                                    ]
-                                                },
-                                            }
-                                        },
-                                        {
-                                            "$concatArrays": [
-                                                "$$existing_flags",
-                                                ["$$new_flag"],
-                                            ]
-                                        },
-                                    ]
-                                },
-                            }
-                        }
-                    }
-                }
-            ],
+            self._build_reviewer_flag_pipeline(
+                message_index=message_index,
+                reviewer_id=reviewer_id,
+                reviewer_flag=reviewer_flag,
+            ),
         )
+
+    @staticmethod
+    # pylint: disable=line-too-long
+    def _build_reviewer_flag_pipeline(
+        message_index: int,
+        reviewer_id: str,
+        reviewer_flag: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Build atomic pipeline to upsert one reviewer flag in messages[index]."""
+        return [
+            {
+                "$set": {
+                    # Use full-array mapping to avoid dotted array-index writes
+                    # in pipeline updates (which can corrupt nested shape).
+                    "messages": {
+                        "$let": {
+                            "vars": {
+                                "target_index": message_index,
+                                "new_flag": reviewer_flag,
+                            },
+                            "in": {
+                                "$map": {
+                                    "input": {"$range": [0, {"$size": "$messages"}]},
+                                    "as": "idx",
+                                    "in": {
+                                        "$let": {
+                                            "vars": {
+                                                "message": {
+                                                    "$arrayElemAt": [
+                                                        "$messages",
+                                                        "$$idx",
+                                                    ]
+                                                }
+                                            },
+                                            "in": {
+                                                "$cond": [
+                                                    {
+                                                        "$eq": [
+                                                            "$$idx",
+                                                            "$$target_index",
+                                                        ]
+                                                    },
+                                                    {
+                                                        "$mergeObjects": [
+                                                            "$$message",
+                                                            {
+                                                                "reviewer_flags": {
+                                                                    "$let": {
+                                                                        "vars": {
+                                                                            "existing_flags": {
+                                                                                    "$ifNull": [
+                                                                                        "$$message.reviewer_flags",
+                                                                                        [],
+                                                                                    ]
+                                                                            }
+                                                                        },
+                                                                        "in": {
+                                                                            "$cond": [
+                                                                                {
+                                                                                    "$in": [
+                                                                                        reviewer_id,
+                                                                                        {
+                                                                                            "$map": {
+                                                                                                "input": "$$existing_flags",
+                                                                                                "as": "flag",
+                                                                                                "in": (
+                                                                                                    "$$flag.reviewer_id"
+                                                                                                ),
+                                                                                            }
+                                                                                        },
+                                                                                    ]
+                                                                                },
+                                                                                {
+                                                                                    "$map": {
+                                                                                        "input": (
+                                                                                            "$$existing_flags"
+                                                                                        ),
+                                                                                        "as": (
+                                                                                            "flag"
+                                                                                        ),
+                                                                                        "in": {
+                                                                                            "$cond": [
+                                                                                                {
+                                                                                                    "$eq": [
+                                                                                                        "$$flag.reviewer_id",
+                                                                                                        reviewer_id,
+                                                                                                    ]
+                                                                                                },
+                                                                                                "$$new_flag",
+                                                                                                "$$flag",
+                                                                                            ]
+                                                                                        },
+                                                                                    }
+                                                                                },
+                                                                                {
+                                                                                    "$concatArrays": [
+                                                                                        "$$existing_flags",
+                                                                                        ["$$new_flag"],
+                                                                                    ]
+                                                                                },
+                                                                            ]
+                                                                        },
+                                                                    }
+                                                                }
+                                                            },
+                                                        ]
+                                                    },
+                                                    "$$message",
+                                                ]
+                                            },
+                                        }
+                                    },
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+        ]
+    # pylint: enable=line-too-long

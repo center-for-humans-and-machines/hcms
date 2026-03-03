@@ -71,8 +71,10 @@ class FakeCollection:
         if isinstance(update, list):
             assert len(update) == 1
             stage = update[0]
-            set_key = f"messages.{message_index}.reviewer_flags"
-            new_flag = deepcopy(stage["$set"][set_key]["$let"]["vars"]["new_flag"])
+            set_messages = stage["$set"]["messages"]
+            new_flag = deepcopy(set_messages["$let"]["vars"]["new_flag"])
+            target_index = set_messages["$let"]["vars"]["target_index"]
+            assert target_index == message_index
             reviewer_id = new_flag["reviewer_id"]
             for index, flag in enumerate(reviewer_flags):
                 if flag.get("reviewer_id") == reviewer_id:
@@ -198,6 +200,25 @@ def test_upsert_system_reviewer_flag_is_idempotent_per_message_and_provider():
     assert message_flags[0]["reviewer_id"] == SYSTEM_OPENAI_REVIEWER_ID
     assert message_flags[0]["categories"] == ["hate"]
     assert collection.update_calls == 2
+
+
+def test_upsert_system_reviewer_flag_pipeline_updates_messages_array():
+    collection = FakeCollection([_conversation_doc()])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    repository.upsert_system_reviewer_flag(
+        conversation_id="conversation-1",
+        message_index=0,
+        reviewer_id=SYSTEM_LLAMA_REVIEWER_ID,
+        categories=[],
+        category_other="",
+        created_at=datetime(2026, 3, 2, 12, 0, 0),
+    )
+
+    updated_doc = collection.docs["conversation-1"]
+    assert isinstance(updated_doc["messages"], list)
+    assert isinstance(updated_doc["messages"][0], dict)
+    assert "0" not in updated_doc["messages"][0]
 
 
 def test_get_backfill_targets_skips_invalid_conversations():
