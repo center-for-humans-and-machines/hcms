@@ -1,0 +1,28 @@
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV POETRY_HOME=/opt/poetry
+ENV PATH="${POETRY_HOME}/bin:${PATH}"
+
+# hadolint ignore=DL3008
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl build-essential \
+  && rm -rf /var/lib/apt/lists/*
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -sSL https://install.python-poetry.org | python3 - \
+  && poetry --version
+
+WORKDIR /app
+
+COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.create false \
+  && poetry install --without dev --no-root --no-interaction --no-ansi
+
+COPY . .
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import hpms.database.models, pymongo, pydantic" || exit 1
+
+CMD ["python", "-m", "hpms.monitoring.watch_mongo_conversations"]

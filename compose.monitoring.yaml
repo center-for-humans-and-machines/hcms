@@ -1,0 +1,84 @@
+name: monitoring
+
+services:
+  mongo:
+    image: mongo:8.2
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet mongodb://localhost:27017 --eval \"quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)\"",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  mongo-init-rs:
+    image: mongo:8.2
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["bash", "-lc"]
+    command:
+      - |
+        for i in {1..60}; do
+          mongosh "mongodb://mongo:27017" --quiet --eval "db.adminCommand({ ping: 1 })" && break;
+          sleep 1;
+        done;
+        mongosh "mongodb://mongo:27017" --quiet --eval "
+          try {
+            const status = rs.status();
+            if (status.ok === 1) {
+              print(\"Replica set already initialized\");
+              quit(0);
+            }
+          } catch (e) {
+            rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongo:27017\" }] });
+            print(\"Replica set initialized\");
+          }
+        "
+
+  watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitoring
+    env_file:
+      - .env
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init-rs:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os; from pymongo import MongoClient; MongoClient(os.environ['MONGODB_URI'], serverSelectionTimeoutMS=2000).admin.command('ping')\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGODB_DATABASE: hpms_local
+      MONGODB_COLLECTION: Conversations
+      MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "1000"
+      MONGODB_BACKFILL_BATCH_SIZE: "200"
+      MONGODB_BACKFILL_MAX_RETRIES: "10"
+      MONGODB_BACKFILL_RETRY_SLEEP_SECONDS: "2"
+      MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: "1"
+      MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: "30"
+      MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "0.25"
+      HPMS_LOG_LEVEL: "INFO"
+
+volumes:
+  mongo_data:
