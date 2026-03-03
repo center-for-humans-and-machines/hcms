@@ -152,9 +152,11 @@ Add:
 Responsibilities:
 - On startup: backfill messages missing either system reviewer entry.
 - Start MongoDB change stream on `Conversations` collection.
+- Reconnect with exponential backoff + jitter after change stream failures.
 - Process new message additions and message content updates.
 - Call both rating functions.
 - Persist results into `messages[].reviewer_flags`.
+- Log runtime counters for observability.
 
 ### 4) Runtime entrypoint
 Add script:
@@ -162,6 +164,7 @@ Add script:
 
 Responsibilities:
 - Read env config.
+- Configure watcher log level from env.
 - Start watcher loop.
 - Handle graceful shutdown.
 
@@ -172,6 +175,12 @@ Add env vars to `env.example`:
 - `MONGODB_COLLECTION=Conversations`
 - `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS=1000`
 - `MONGODB_BACKFILL_BATCH_SIZE=200`
+- `MONGODB_BACKFILL_MAX_RETRIES=10`
+- `MONGODB_BACKFILL_RETRY_SLEEP_SECONDS=2`
+- `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS=1`
+- `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS=30`
+- `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS=0.25`
+- `HPMS_LOG_LEVEL=INFO`
 
 ## Processing Rules
 
@@ -198,8 +207,13 @@ Input: string from `_rate_text_with_llama_guard`.
 
 ### Failure behavior
 - If one provider fails, still persist the other provider result.
-- Retry failed provider on next change event or next startup backfill.
+- During startup backfill, retry failed provider writes until success, retry budget exhaustion, or no retry-eligible targets remain.
+- After startup, retry failed provider on future change events and future restarts.
 - Do not create duplicate system reviewer entries.
+
+### Import behavior
+- `hpms.monitoring` exports `RealtimeConversationWatcher` lazily.
+- Importing non-watcher monitoring components must not require moderation credentials at module import time.
 
 ## Testing Plan
 

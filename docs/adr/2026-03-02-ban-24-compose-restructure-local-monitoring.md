@@ -76,9 +76,19 @@ Add explicit lifecycle scripts:
   - `MONGODB_COLLECTION=Conversations`
   - `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS=1000`
   - `MONGODB_BACKFILL_BATCH_SIZE=200`
+  - `MONGODB_BACKFILL_MAX_RETRIES=10`
+  - `MONGODB_BACKFILL_RETRY_SLEEP_SECONDS=2`
+  - `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS=1`
+  - `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS=30`
+  - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS=0.25`
+  - `HPMS_LOG_LEVEL=INFO`
   - `OPENAI_MODERATION_API_KEY`
   - `LLAMA_GUARD_API_KEY`
   - `LLAMA_GUARD_ENDPOINT`
+- runtime behavior:
+  - startup backfill retries transient provider failures with bounded retry budget
+  - change stream reconnection uses exponential backoff with jitter
+  - watcher logs periodic runtime counters and unresolved startup backfill targets
 
 ## Operational Commands
 

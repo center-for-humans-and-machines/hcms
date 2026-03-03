@@ -71,6 +71,23 @@ Use these lifecycle scripts for local MongoDB + watcher:
   ./script/destroy-monitoring
   ```
 
+Watcher runtime behavior:
+
+- Startup backfill retries transient provider failures (default `10` retries, `2s` between no-progress retries).
+- Change stream reconnect uses exponential backoff with jitter (default `1s` base, `30s` max, `0.25s` jitter).
+- Logging level defaults to `INFO` and can be tuned with `HPMS_LOG_LEVEL`.
+
+Main tuning variables (set in `.env`):
+
+- `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS`
+- `MONGODB_BACKFILL_BATCH_SIZE`
+- `MONGODB_BACKFILL_MAX_RETRIES`
+- `MONGODB_BACKFILL_RETRY_SLEEP_SECONDS`
+- `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS`
+- `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS`
+- `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS`
+- `HPMS_LOG_LEVEL`
+
 Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
 
 ```text
