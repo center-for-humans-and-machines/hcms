@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# Stop and remove local monitoring stack (local data in database will be lost).
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+# shellcheck disable=SC1091
+source utils.sh
+
+check_command docker
+
+fancy_echo "Destroying local monitoring stack"
+docker compose --file compose.monitoring.yaml down --volumes --remove-orphans

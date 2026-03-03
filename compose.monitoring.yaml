@@ -1,0 +1,55 @@
+services:
+  mongo:
+    image: mongo:7
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  mongo-init-rs:
+    image: mongo:7
+    depends_on:
+      - mongo
+    restart: "no"
+    entrypoint: ["bash", "-lc"]
+    command: >
+      'for i in {1..60}; do
+        mongosh "mongodb://mongo:27017" --quiet --eval "db.adminCommand({ ping: 1 })" && break;
+        sleep 1;
+      done;
+      mongosh "mongodb://mongo:27017" --quiet --eval "
+        try {
+          const status = rs.status();
+          if (status.ok === 1) {
+            print(\"Replica set already initialized\");
+            quit(0);
+          }
+        } catch (e) {
+          rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongo:27017\" }] });
+          print(\"Replica set initialized\");
+        }
+      "'
+
+  hpms-watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitoring
+    depends_on:
+      mongo:
+        condition: service_started
+      mongo-init-rs:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGODB_DATABASE: hpms_local
+      MONGODB_COLLECTION: conversations
+      MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "1000"
+      MONGODB_BACKFILL_BATCH_SIZE: "200"
+      OPENAI_MODERATION_API_KEY: ${OPENAI_MODERATION_API_KEY}
+      LLAMA_GUARD_API_KEY: ${LLAMA_GUARD_API_KEY}
+      LLAMA_GUARD_ENDPOINT: ${LLAMA_GUARD_ENDPOINT}
+
+volumes:
+  mongo_data:

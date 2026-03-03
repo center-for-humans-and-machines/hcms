@@ -1,0 +1,131 @@
+<!-- markdownlint-disable MD022 MD032 -->
+
+# Compose Restructure for Lint and Local Monitoring
+
+## Status
+
+Accepted
+
+## Context
+
+The repository used a single `compose.yaml` file that defined only the
+`super-linter` service. This created two issues:
+
+1. The default Compose filename implied it was the general project stack, but it
+   was only for linting.
+2. The new MongoDB watcher runtime for BAN-24 needs a dedicated local stack
+   including MongoDB replica set initialization and the HPMS watcher process.
+
+## Decision
+
+Split Compose files by purpose:
+
+1. `compose.lint.yaml`
+   - contains only the `super-linter` service.
+2. `compose.monitoring.yaml`
+   - contains local runtime services for monitoring:
+     - `mongo`
+     - `mongo-init-rs`
+     - `hpms-watcher`
+
+Update script wiring so linting is explicit:
+
+- `script/lint-superlinter` now runs:
+  - `docker compose -f compose.lint.yaml run --rm --remove-orphans super-linter`
+
+Add a dedicated watcher image build definition:
+
+- `Dockerfile.monitoring`
+  - based on `python:3.13-slim`
+  - installs Poetry and project dependencies
+  - runs `poetry run python watch_mongo_conversations.py`
+
+Add a convenience script:
+
+- `script/monitoring-local`
+  - compatibility wrapper delegating to `./script/start-monitoring`
+
+Add explicit lifecycle scripts:
+
+- `script/start-monitoring`
+  - runs `docker compose --file compose.monitoring.yaml up --detach --build --remove-orphans`
+- `script/stop-monitoring`
+  - runs `docker compose --file compose.monitoring.yaml stop`
+- `script/destroy-monitoring`
+  - runs `docker compose --file compose.monitoring.yaml down --volumes --remove-orphans`
+
+## Local Monitoring Stack Architecture
+
+### `mongo`
+
+- image: `mongo:7`
+- command: `--replSet rs0 --bind_ip_all`
+- port: `27017:27017`
+- persistent volume: `mongo_data`
+
+### `mongo-init-rs`
+
+- one-shot helper container
+- waits until MongoDB is reachable
+- initializes replica set if needed (`rs.initiate(...)`)
+- exits cleanly if replica set is already initialized
+
+### `hpms-watcher`
+
+- built from `Dockerfile.monitoring`
+- depends on `mongo` and successful completion of `mongo-init-rs`
+- runs with restart policy `unless-stopped`
+- environment contract:
+  - `MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0`
+  - `MONGODB_DATABASE=hpms_local`
+  - `MONGODB_COLLECTION=conversations`
+  - `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS=1000`
+  - `MONGODB_BACKFILL_BATCH_SIZE=200`
+  - `OPENAI_MODERATION_API_KEY`
+  - `LLAMA_GUARD_API_KEY`
+  - `LLAMA_GUARD_ENDPOINT`
+
+## Operational Commands
+
+### Linting
+
+- `./script/lint-superlinter`
+- `docker compose -f compose.lint.yaml run --rm --remove-orphans super-linter`
+
+### Local Monitoring
+
+- start:
+  - `./script/start-monitoring`
+- stop:
+  - `./script/stop-monitoring`
+- destroy (data loss):
+  - `./script/destroy-monitoring`
+
+### Validation
+
+Insert a valid conversation into `hpms_local.conversations` and verify watcher
+writes system `reviewer_flags` entries for:
+
+- `system_openai_moderation`
+- `system_llama_guard`
+
+## Migration Impact
+
+- `compose.yaml` is no longer the lint stack filename.
+- `script/lint-superlinter` now has explicit compose file selection.
+- local monitoring now has a canonical Compose entrypoint via
+  `compose.monitoring.yaml`.
+- lifecycle operations are explicit through start/stop/destroy scripts.
+
+## Consequences
+
+Positive:
+
+- clearer separation between CI/local lint tooling and runtime services
+- reproducible local monitoring stack for development and testing
+- explicit script behavior independent of default Compose file naming
+
+Trade-offs:
+
+- additional Compose and Docker maintenance surface
+- local monitoring requires Docker resources and provider credentials

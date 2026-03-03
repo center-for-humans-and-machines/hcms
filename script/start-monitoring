@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# Start local monitoring stack (MongoDB + HPMS watcher).
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+# shellcheck disable=SC1091
+source utils.sh
+
+check_command docker
+
+fancy_echo "Starting local monitoring stack"
+docker compose --file compose.monitoring.yaml up --detach --build --remove-orphans

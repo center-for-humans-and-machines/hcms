@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# Run local monitoring stack (MongoDB + HPMS watcher).
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+# shellcheck disable=SC1091
+source utils.sh
+
+fancy_echo "Compatibility wrapper: delegating to ./script/start-monitoring"
+./script/start-monitoring

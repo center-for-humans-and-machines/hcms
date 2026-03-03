@@ -1,45 +1,23 @@
-# Hybrid Psychiatrist-in-the-Loop Monitoring System for LLM Conversational Agents
+# HPMS
+
+Hybrid Psychiatrist-in-the-Loop Monitoring System (HPMS) for safety monitoring and evaluation of LLM conversational agents.
 
 ## Requirements
 
-Assuming macOS with [Homebrew](https://brew.sh/) installed.
-
-- Python 3.13 or later
-- [`pre-commit`](https://pre-commit.com/) - linter orchestration
-
-  ```sh
-  brew install pre-commit
-  ```
-
-- [`pylint`](https://pylint.readthedocs.io/en/stable/) - local linter
-
-  ```sh
-  brew install pylint
-  ```
-
-- [`poetry`](https://python-poetry.org/) - package manager
-
-  ```sh
-  pipx install poetry==2.1.2
-  ```
-
-- [`font-linux-libertine`](https://formulae.brew.sh/cask/font-linux-libertine) - font for plots
-
-  ```sh
-  brew install --cask font-linux-libertine
-  ```
-
-- Follow [data.qmd](./docs/data.qmd) to download the datasets
+- Python `3.13+`
+- [Poetry](https://python-poetry.org/) `2.1.2`
+- [Docker](https://docs.docker.com/get-docker/) with Compose v2
+- [`pre-commit`](https://pre-commit.com/)
 
 ## Installation
 
-- Install Python dependencies
+- Bootstrap local environment:
 
   ```sh
   ./script/bootstrap
   ```
 
-- Install Python package
+- Install package dependencies:
 
   ```sh
   ./script/install
@@ -47,96 +25,82 @@ Assuming macOS with [Homebrew](https://brew.sh/) installed.
 
 ## Usage
 
-The data from the paper is available in the [`data/paper`](./data/paper/) folder and are needed to run some of the notebooks.
-There are two main scripts to run the experiments:
+### Core workflows
 
-1. `generate_dataset.py`: generates the synthetic conversational datasets
-1. `evaluate_dataset.py`: evaluates the datasets using automated metrics
+- Generate dataset:
 
-Both scripts are executed in the [regression test pipeline](./.github/workflows/regression-test.yml) using GitHub Actions.
+  ```sh
+  poetry run python generate_dataset.py --round-number=2 --tag=acm-tist
+  ```
 
-### Scripts
+- Evaluate dataset:
 
-#### Linting
+  ```sh
+  poetry run python evaluate_dataset.py --round-number=2
+  ```
 
-- Lint the code locally
+### Lint and tests
+
+- Run linters:
 
   ```sh
   ./script/lint
   ```
 
-#### Testing
-
-- Show help message for the test script
-
-  ```sh
-  ./script/test -h
-  ```
-
-- Run tests using `pytest` (except for regression tests)
+- Run tests (excluding regression):
 
   ```sh
   ./script/test
   ```
 
-- Run regression tests using `pytest`
+- Run full tests (including regression):
 
   ```sh
   ./script/test -r
   ```
 
-## Data Generation
+### Local monitoring stack
 
-1. Generate dataset:
+Use these lifecycle scripts for local MongoDB + watcher:
 
-   **Round 2**
+- Start stack:
 
-   1. Review `.env` file to set provider and model
-   1. Repeat the following process for each model
+  ```sh
+  ./script/start-monitoring
+  ```
 
-      ```bash
-      poetry run python generate_dataset.py --round-number=2 --tag=acm-tist
-      ```
+- Stop stack (keep data):
 
-   **Round 3**
+  ```sh
+  ./script/stop-monitoring
+  ```
 
-   1. Review `.env` file to set provider and model
-   1. Repeat the process for each model, but with `--round-number=3`
+- Destroy stack (remove containers + volumes):
 
-      ```bash
-      poetry run python generate_dataset.py --round-number=3 --tag=acm-tist
-      ```
+  ```sh
+  ./script/destroy-monitoring
+  ```
 
-## Data Evaluation
+Compatibility wrapper:
 
-1. Evaluate dataset:
+- `./script/monitoring-local` delegates to `./script/start-monitoring`.
 
-   **Round 2**
+## Documentation
 
-   1. Repeat the following process for each model
+- ADR for compose split and local monitoring stack:
+  - [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local-monitoring.md)
+- ADR for Mongo schema alignment and realtime watcher:
+  - [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime-monitoring.md)
+- Contribution guide:
+  - [contributing.md](./contributing.md)
 
-      ```bash
-      poetry run python evaluate_dataset.py --round-number=2
-      ```
+## Related
 
-   **Round 3**
-
-   1. Repeat the process for each model, but with `--round-number=3`
-
-      ```bash
-      poetry run python evaluate_dataset.py --round-number=3
-      ```
-
-## Contributing
-
-Please read [contributing.md](contributing.md) for details on the guidelines for this project.
-
-## Credits
-
-- Scripts follow [rodrigobdz/styleguide-sh](https://github.com/rodrigobdz/styleguide-sh)
-- Linter configuration files imported from [rodrigobdz/linters](https://github.com/rodrigobdz/linters)
-- Readme is based on [rodrigobdz/minimal-readme](https://github.com/rodrigobdz/minimal-readme)
+- Readme template:
+  - [minimal-readme](https://github.com/rodrigobdz/minimal-readme)
+- Shell style:
+  - [styleguide-sh](https://github.com/rodrigobdz/styleguide-sh)
 
 ## License
 
-[CC-BY-4.0](license)
+[CC-BY-4.0](./license)
