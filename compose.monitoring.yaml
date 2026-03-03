@@ -48,6 +48,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.monitoring
+    env_file:
+      - .env
     depends_on:
       mongo:
         condition: service_healthy
@@ -67,12 +69,9 @@ services:
     environment:
       MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
       MONGODB_DATABASE: hpms_local
-      MONGODB_COLLECTION: conversations
+      MONGODB_COLLECTION: Conversations
       MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "1000"
       MONGODB_BACKFILL_BATCH_SIZE: "200"
-      OPENAI_MODERATION_API_KEY: ${OPENAI_MODERATION_API_KEY}
-      LLAMA_GUARD_API_KEY: ${LLAMA_GUARD_API_KEY}
-      LLAMA_GUARD_ENDPOINT: ${LLAMA_GUARD_ENDPOINT}
 
 volumes:
   mongo_data:

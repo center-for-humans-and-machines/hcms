@@ -17,7 +17,8 @@ __pycache__/
 .env
 .env.*
 
-data/
+data/*
+!data/*-system-prompt.txt
 notebooks/
 tests/
 docs/
