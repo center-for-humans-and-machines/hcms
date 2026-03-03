@@ -1,6 +1,6 @@
 """Tests for Mongo conversation repository helpers."""
 
-# pylint: disable=missing-function-docstring,too-few-public-methods,too-many-locals
+# pylint: disable=missing-function-docstring,too-few-public-methods,too-many-locals,duplicate-code
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ class FakeCollection:
 
     def __init__(self, docs: list[dict[str, Any]]):
         self.docs = {doc["_id"]: deepcopy(doc) for doc in docs}
+        self.update_calls = 0
 
     def find(self, *_args, **_kwargs):
         return [deepcopy(doc) for doc in self.docs.values()]
@@ -40,50 +41,44 @@ class FakeCollection:
     def update_one(
         self,
         query: dict[str, Any],
-        update: dict[str, Any],
+        update: Any,
         array_filters: list[dict[str, Any]] | None = None,
     ):
+        _ = array_filters
+        self.update_calls += 1
+
         doc = self.docs.get(query.get("_id"))
         if doc is None:
             return _UpdateResult(0)
 
-        message_key = next(
-            key
-            for key in query.keys()
-            if key.startswith("messages.") and key.endswith("reviewer_id")
-        )
-        message_index = int(message_key.split(".")[1])
-        reviewer_condition = query[message_key]
+        message_index = None
+        for key in query:
+            if not key.startswith("messages."):
+                continue
+            parts = key.split(".")
+            if len(parts) >= 2 and parts[1].isdigit():
+                message_index = int(parts[1])
+                break
+
+        if message_index is None:
+            raise AssertionError("Missing message index in query")
+        if message_index < 0 or message_index >= len(doc["messages"]):
+            return _UpdateResult(0)
 
         message = doc["messages"][message_index]
         reviewer_flags = message.setdefault("reviewer_flags", [])
 
-        if isinstance(reviewer_condition, str):
-            if not any(
-                flag.get("reviewer_id") == reviewer_condition for flag in reviewer_flags
-            ):
-                return _UpdateResult(0)
-
-        if isinstance(reviewer_condition, dict) and "$ne" in reviewer_condition:
-            reviewer_id = reviewer_condition["$ne"]
-            if any(flag.get("reviewer_id") == reviewer_id for flag in reviewer_flags):
-                return _UpdateResult(0)
-
-        if "$set" in update:
-            assert array_filters is not None
-            reviewer_id = array_filters[0]["flag.reviewer_id"]
-            for flag in reviewer_flags:
-                if flag.get("reviewer_id") != reviewer_id:
-                    continue
-                for path, value in update["$set"].items():
-                    field_name = path.split(".")[-1]
-                    flag[field_name] = value
-                return _UpdateResult(1)
-            return _UpdateResult(0)
-
-        if "$push" in update:
-            push_key = f"messages.{message_index}.reviewer_flags"
-            reviewer_flags.append(deepcopy(update["$push"][push_key]))
+        if isinstance(update, list):
+            assert len(update) == 1
+            stage = update[0]
+            set_key = f"messages.{message_index}.reviewer_flags"
+            new_flag = deepcopy(stage["$set"][set_key]["$let"]["vars"]["new_flag"])
+            reviewer_id = new_flag["reviewer_id"]
+            for index, flag in enumerate(reviewer_flags):
+                if flag.get("reviewer_id") == reviewer_id:
+                    reviewer_flags[index] = new_flag
+                    return _UpdateResult(1)
+            reviewer_flags.append(new_flag)
             return _UpdateResult(1)
 
         raise AssertionError("Unsupported update operation in fake collection")
@@ -183,6 +178,7 @@ def test_upsert_system_reviewer_flag_is_idempotent_per_message_and_provider():
     assert len(message_flags) == 1
     assert message_flags[0]["reviewer_id"] == SYSTEM_OPENAI_REVIEWER_ID
     assert message_flags[0]["categories"] == ["hate"]
+    assert collection.update_calls == 2
 
 
 def test_get_backfill_targets_skips_invalid_conversations():

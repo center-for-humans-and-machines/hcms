@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
+import subprocess
+import sys
 from typing import Any
 
 from hpms.database.models import ConversationDocument
@@ -316,6 +319,98 @@ def test_run_startup_backfill_processes_targets_until_empty():
     }
 
 
+def test_run_startup_backfill_retries_transient_provider_failure():
+    openai_calls = {"count": 0}
+
+    def flaky_openai_rater(_text: str):
+        openai_calls["count"] += 1
+        if openai_calls["count"] == 1:
+            raise RuntimeError("temporary failure")
+        return [0, "hate"]
+
+    repository = StubRepository(
+        backfill_batches=[
+            [
+                MessageBackfillTarget(
+                    conversation_id="conversation-3b",
+                    message_index=0,
+                    content="one",
+                    missing_reviewer_ids={
+                        SYSTEM_OPENAI_REVIEWER_ID,
+                        SYSTEM_LLAMA_REVIEWER_ID,
+                    },
+                )
+            ],
+            [
+                MessageBackfillTarget(
+                    conversation_id="conversation-3b",
+                    message_index=0,
+                    content="one",
+                    missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+                )
+            ],
+            [],
+        ]
+    )
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=flaky_openai_rater,
+        llama_guard_rater=lambda _text: "0",
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.run_startup_backfill()
+
+    openai_writes = [
+        call
+        for call in repository.calls
+        if call.reviewer_id == SYSTEM_OPENAI_REVIEWER_ID
+    ]
+    llama_writes = [
+        call
+        for call in repository.calls
+        if call.reviewer_id == SYSTEM_LLAMA_REVIEWER_ID
+    ]
+
+    assert openai_calls["count"] == 2
+    assert len(openai_writes) == 1
+    assert len(llama_writes) == 1
+
+
+def test_run_startup_backfill_stops_after_retry_budget_exhausted():
+    def always_failing_openai(_text: str):
+        raise RuntimeError("always fail")
+
+    target = MessageBackfillTarget(
+        conversation_id="conversation-3c",
+        message_index=0,
+        content="one",
+        missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+    )
+    repository = StubRepository(
+        backfill_batches=[
+            [target],
+            [target],
+            [target],  # this should remain unused after retry exhaustion
+        ]
+    )
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=always_failing_openai,
+        llama_guard_rater=lambda _text: "0",
+        backfill_max_retries=2,
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.run_startup_backfill()
+
+    assert len(repository.calls) == 0
+    assert watcher._unresolved_backfill_targets == 1  # pylint: disable=protected-access
+    assert len(repository.backfill_batches) == 1
+
+
 def test_failure_is_retried_on_later_attempt():
     repository = StubRepository()
     openai_calls = {"count": 0}
@@ -359,3 +454,48 @@ def test_failure_is_retried_on_later_attempt():
     assert len(openai_calls) == 1
     assert openai_calls[0].categories == ["violence"]
     assert len(llama_calls) == 2
+
+
+def test_compute_reconnect_sleep_seconds_grows_and_caps(monkeypatch):
+    monkeypatch.setattr(
+        "hpms.monitoring.realtime_watcher.random.uniform", lambda *_: 0.0
+    )
+
+    watcher = RealtimeConversationWatcher(
+        repository=StubRepository(),
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text: "0",
+        reconnect_backoff_base_seconds=1.0,
+        reconnect_backoff_max_seconds=4.0,
+        reconnect_backoff_jitter_seconds=0.0,
+    )
+
+    assert watcher._compute_reconnect_sleep_seconds(1) == 1.0  # pylint: disable=protected-access
+    assert watcher._compute_reconnect_sleep_seconds(2) == 2.0  # pylint: disable=protected-access
+    assert watcher._compute_reconnect_sleep_seconds(3) == 4.0  # pylint: disable=protected-access
+    assert watcher._compute_reconnect_sleep_seconds(8) == 4.0  # pylint: disable=protected-access
+
+
+def test_monitoring_package_import_does_not_require_moderation_credentials():
+    env = os.environ.copy()
+    env.pop("OPENAI_MODERATION_API_KEY", None)
+    env.pop("LLAMA_GUARD_API_KEY", None)
+    env.pop("LLAMA_GUARD_ENDPOINT", None)
+
+    command = (
+        "import hpms.monitoring\n"
+        "assert hasattr(hpms.monitoring, 'RateMessagesProcessor')\n"
+        "from hpms.monitoring import RealtimeConversationWatcher\n"
+        "assert RealtimeConversationWatcher.__name__ == 'RealtimeConversationWatcher'\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "ok" in result.stdout
