@@ -37,10 +37,10 @@ google-auth-httplib2 = "^0.2.0"
 google-auth-oauthlib = "^1.2.2"
 pytz = "^2025.2"
 pymongo = "^4.12.1"
+pydantic = "^2.11.3"
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^3.3.2"
-pydantic = "^2.11.3"
 pyink = "^24.10.1"
 
 [build-system]
