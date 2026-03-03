@@ -31,7 +31,7 @@ class MongoConversationRepository:
         self,
         mongo_uri: str,
         database_name: str,
-        collection_name: str = "conversations",
+        collection_name: str = "Conversations",
     ) -> None:
         # Import lazily so tests can run without pymongo installed.
         # pylint: disable=import-outside-toplevel

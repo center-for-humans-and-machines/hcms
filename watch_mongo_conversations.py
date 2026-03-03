@@ -18,7 +18,7 @@ def main() -> None:
     repository = MongoConversationRepository(
         mongo_uri=get_env_variable("MONGODB_URI"),
         database_name=get_env_variable("MONGODB_DATABASE"),
-        collection_name=get_env_variable("MONGODB_COLLECTION", default="conversations"),
+        collection_name=get_env_variable("MONGODB_COLLECTION", default="Conversations"),
     )
 
     watcher = RealtimeConversationWatcher(

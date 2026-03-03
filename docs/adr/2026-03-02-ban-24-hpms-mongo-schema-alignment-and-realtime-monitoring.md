@@ -151,7 +151,7 @@ Add:
 
 Responsibilities:
 - On startup: backfill messages missing either system reviewer entry.
-- Start MongoDB change stream on `conversations` collection.
+- Start MongoDB change stream on `Conversations` collection.
 - Process new message additions and message content updates.
 - Call both rating functions.
 - Persist results into `messages[].reviewer_flags`.
@@ -169,7 +169,7 @@ Responsibilities:
 Add env vars to `env.example`:
 - `MONGODB_URI`
 - `MONGODB_DATABASE`
-- `MONGODB_COLLECTION=conversations`
+- `MONGODB_COLLECTION=Conversations`
 - `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS=1000`
 - `MONGODB_BACKFILL_BATCH_SIZE=200`
 

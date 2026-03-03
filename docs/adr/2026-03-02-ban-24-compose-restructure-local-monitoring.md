@@ -73,7 +73,7 @@ Add explicit lifecycle scripts:
 - environment contract:
   - `MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0`
   - `MONGODB_DATABASE=hpms_local`
-  - `MONGODB_COLLECTION=conversations`
+  - `MONGODB_COLLECTION=Conversations`
   - `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS=1000`
   - `MONGODB_BACKFILL_BATCH_SIZE=200`
   - `OPENAI_MODERATION_API_KEY`
@@ -98,7 +98,7 @@ Add explicit lifecycle scripts:
 
 ### Validation
 
-Insert a valid conversation into `hpms_local.conversations` and verify watcher
+Insert a valid conversation into `hpms_local.Conversations` and verify watcher
 writes system `reviewer_flags` entries for:
 
 - `system_openai_moderation`
