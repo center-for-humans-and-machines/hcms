@@ -48,7 +48,7 @@ class MessageDocument(BaseModel):
     timestamp: datetime
     type: str = Field(..., min_length=1)
     user_flag: UserFlagDocument = Field(default_factory=UserFlagDocument)
-    reviewer_flags: List[ReviewerFlagDocument] = Field(...)
+    reviewer_flags: List[ReviewerFlagDocument] = Field(default_factory=list)
 
 
 class OpenedByDocument(BaseModel):
@@ -90,6 +90,6 @@ class ConversationDocument(BaseModel):
     experiment_id: str = Field(..., min_length=1)
     created_at: datetime
     messages: List[MessageDocument] = Field(...)
-    opened_by: List[OpenedByDocument] = Field(...)
-    reviewed_by: List[ReviewedByDocument] = Field(...)
-    assigned_to: List[ConversationAssignmentDocument] = Field(...)
+    opened_by: List[OpenedByDocument] = Field(default_factory=list)
+    reviewed_by: List[ReviewedByDocument] = Field(default_factory=list)
+    assigned_to: List[ConversationAssignmentDocument] = Field(default_factory=list)

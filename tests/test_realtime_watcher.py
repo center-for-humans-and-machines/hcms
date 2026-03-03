@@ -249,6 +249,40 @@ def test_handle_change_event_defaults_missing_user_flag_and_processes_message():
     assert all(call.message_index == 0 for call in repository.calls)
 
 
+def test_handle_change_event_defaults_missing_optional_message_and_conversation_lists():
+    repository = StubRepository()
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "hate"],
+        llama_guard_rater=lambda _text: "0",
+    )
+
+    event = {
+        "operationType": "insert",
+        "fullDocument": {
+            "_id": "conversation-2c",
+            "participant_id": "p1",
+            "model": "test-model",
+            "experiment_id": "exp-1",
+            "created_at": "2026-03-02T00:00:00Z",
+            "messages": [
+                {
+                    "content": "needs rating",
+                    "role": "assistant",
+                    "timestamp": "2026-03-02T00:00:00Z",
+                    "type": "assistant",
+                }
+            ],
+        },
+    }
+
+    watcher.handle_change_event(event)
+
+    assert len(repository.calls) == 2
+    assert all(call.message_index == 0 for call in repository.calls)
+
+
 def test_run_startup_backfill_processes_targets_until_empty():
     repository = StubRepository(
         backfill_batches=[

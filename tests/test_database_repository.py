@@ -237,3 +237,36 @@ def test_get_backfill_targets_defaults_missing_user_flag():
         SYSTEM_OPENAI_REVIEWER_ID,
         SYSTEM_LLAMA_REVIEWER_ID,
     }
+
+
+def test_get_backfill_targets_defaults_missing_optional_lists():
+    now = datetime.now(timezone.utc)
+    conversation_missing_optional_lists = {
+        "_id": "conversation-missing-lists",
+        "participant_id": "p3",
+        "model": "test-model",
+        "experiment_id": "exp-3",
+        "created_at": now,
+        "messages": [
+            {
+                "content": "message without optional lists",
+                "role": "assistant",
+                "timestamp": now,
+                "type": "assistant",
+            }
+        ],
+    }
+
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation_missing_optional_lists])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 1
+    assert targets[0].conversation_id == "conversation-missing-lists"
+    assert targets[0].message_index == 0
+    assert targets[0].missing_reviewer_ids == {
+        SYSTEM_OPENAI_REVIEWER_ID,
+        SYSTEM_LLAMA_REVIEWER_ID,
+    }
