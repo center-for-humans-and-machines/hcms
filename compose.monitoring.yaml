@@ -1,3 +1,5 @@
+name: monitoring
+
 services:
   mongo:
     image: mongo:8.2
@@ -31,7 +33,7 @@ services:
         }
       "'
 
-  hpms-watcher:
+  watcher:
     build:
       context: .
       dockerfile: Dockerfile.monitoring

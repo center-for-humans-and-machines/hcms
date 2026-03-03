@@ -26,7 +26,7 @@ Split Compose files by purpose:
    - contains local runtime services for monitoring:
      - `mongo`
      - `mongo-init-rs`
-     - `hpms-watcher`
+     - `watcher`
 
 Update script wiring so linting is explicit:
 
@@ -65,7 +65,7 @@ Add explicit lifecycle scripts:
 - initializes replica set if needed (`rs.initiate(...)`)
 - exits cleanly if replica set is already initialized
 
-### `hpms-watcher`
+### `watcher`
 
 - built from `Dockerfile.monitoring`
 - depends on `mongo` and successful completion of `mongo-init-rs`
