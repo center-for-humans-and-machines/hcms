@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 from typing import Any, Iterable, Optional, Set
 
 from pydantic import ValidationError
@@ -12,6 +13,7 @@ from hpms.database.models import ConversationDocument, MessageDocument
 
 SYSTEM_OPENAI_REVIEWER_ID = "system_openai_moderation"
 SYSTEM_LLAMA_REVIEWER_ID = "system_llama_guard"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -68,9 +70,10 @@ class MongoConversationRepository:
         try:
             validated = ConversationDocument.model_validate(conversation)
         except ValidationError as error:
-            print(
-                "Skipping invalid conversation document "
-                f"{conversation.get('_id')}: {error}"
+            LOGGER.warning(
+                "Skipping invalid conversation document %s: %s",
+                conversation.get("_id"),
+                error,
             )
             return None
         return validated.model_dump(by_alias=True)
@@ -174,9 +177,11 @@ class MongoConversationRepository:
         try:
             validated_message = MessageDocument.model_validate(message)
         except ValidationError as error:
-            print(
-                "Skipping invalid message document "
-                f"conversation={conversation_id} index={message_index}: {error}"
+            LOGGER.warning(
+                "Skipping invalid message document conversation=%s index=%s: %s",
+                conversation_id,
+                message_index,
+                error,
             )
             return None
 
@@ -203,35 +208,69 @@ class MongoConversationRepository:
             "category_other": category_other,
         }
 
-        # Update existing entry if present.
-        update_existing = self.collection.update_one(
-            {
-                "_id": conversation_id,
-                f"messages.{message_index}.reviewer_flags.reviewer_id": reviewer_id,
-            },
-            {
-                "$set": {
-                    "messages."
-                    f"{message_index}.reviewer_flags.$[flag].created_at": timestamp,
-                    "messages."
-                    f"{message_index}.reviewer_flags.$[flag].categories": normalized_categories,
-                    "messages."
-                    f"{message_index}.reviewer_flags.$[flag].category_other": category_other,
-                }
-            },
-            array_filters=[{"flag.reviewer_id": reviewer_id}],
-        )
+        # Atomically update or append one provider entry within reviewer_flags.
+        reviewer_flags_path = f"messages.{message_index}.reviewer_flags"
+        existing_flags_path = f"$messages.{message_index}.reviewer_flags"
 
-        if update_existing.matched_count > 0:
-            return
-
-        # Insert only if there is no existing flag for this reviewer_id at message index.
         self.collection.update_one(
             {
                 "_id": conversation_id,
-                f"messages.{message_index}.reviewer_flags.reviewer_id": {
-                    "$ne": reviewer_id
-                },
+                f"messages.{message_index}": {"$exists": True},
             },
-            {"$push": {f"messages.{message_index}.reviewer_flags": reviewer_flag}},
+            [
+                {
+                    "$set": {
+                        reviewer_flags_path: {
+                            "$let": {
+                                "vars": {
+                                    "existing_flags": {
+                                        "$ifNull": [existing_flags_path, []]
+                                    },
+                                    "new_flag": reviewer_flag,
+                                },
+                                "in": {
+                                    "$cond": [
+                                        {
+                                            "$in": [
+                                                reviewer_id,
+                                                {
+                                                    "$map": {
+                                                        "input": "$$existing_flags",
+                                                        "as": "flag",
+                                                        "in": "$$flag.reviewer_id",
+                                                    }
+                                                },
+                                            ]
+                                        },
+                                        {
+                                            "$map": {
+                                                "input": "$$existing_flags",
+                                                "as": "flag",
+                                                "in": {
+                                                    "$cond": [
+                                                        {
+                                                            "$eq": [
+                                                                "$$flag.reviewer_id",
+                                                                reviewer_id,
+                                                            ]
+                                                        },
+                                                        "$$new_flag",
+                                                        "$$flag",
+                                                    ]
+                                                },
+                                            }
+                                        },
+                                        {
+                                            "$concatArrays": [
+                                                "$$existing_flags",
+                                                ["$$new_flag"],
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+            ],
         )
