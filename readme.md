@@ -73,20 +73,15 @@ Use these lifecycle scripts for local MongoDB + watcher:
 
 ## Documentation
 
-- Architecture Decision Record (ADR) for compose split and local monitoring stack:
-  - [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local-monitoring.md)
-- Architecture Decision Record (ADR) for Mongo schema alignment and realtime watcher:
-  - [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime-monitoring.md)
-- Paper data workflow:
-  - [paper-data-workflow.md](./docs/paper-data-workflow.md)
+- Architecture Decision Record (ADR) for compose split and local monitoring stack: [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local-monitoring.md)
+- Architecture Decision Record (ADR) for Mongo schema alignment and realtime watcher: [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime-monitoring.md)
+- Paper data workflow: [paper-data-workflow.md](./docs/paper-data-workflow.md)
 - Contribution guide: [contributing.md](./contributing.md)
 
 ## Related
 
-- Readme template:
-  - [minimal-readme](https://github.com/rodrigobdz/minimal-readme)
-- Shell style:
-  - [styleguide-sh](https://github.com/rodrigobdz/styleguide-sh)
+- Readme template: [minimal-readme](https://github.com/rodrigobdz/minimal-readme)
+- Shell style: [styleguide-sh](https://github.com/rodrigobdz/styleguide-sh)
 
 ## License
 
