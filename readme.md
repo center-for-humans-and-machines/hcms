@@ -25,24 +25,9 @@ Hybrid Psychiatrist-in-the-Loop Monitoring System (HPMS) for safety monitoring a
 
 ## Usage
 
-### Paper
+Paper dataset generation and evaluation instructions are documented in:
 
-The data from the paper is available in the [`data/paper`](./data/paper/) folder and are needed to run some of the notebooks.
-There are two main scripts to run the experiments:
-
-- Generate dataset:
-
-  ```sh
-  poetry run python generate_dataset.py --round-number=2 --tag=acm-tist
-  ```
-
-- Evaluate dataset:
-
-  ```sh
-  poetry run python evaluate_dataset.py --round-number=2
-  ```
-
-Both scripts are executed in the [regression test pipeline](./.github/workflows/regression-test.yml) using GitHub Actions.
+- [`docs/paper-data-workflow.md`](./docs/paper-data-workflow.md)
 
 ### Lint and tests
 
@@ -92,6 +77,8 @@ Use these lifecycle scripts for local MongoDB + watcher:
   - [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local-monitoring.md)
 - ADR for Mongo schema alignment and realtime watcher:
   - [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime-monitoring.md)
+- Paper data workflow:
+  - [paper-data-workflow.md](./docs/paper-data-workflow.md)
 - Contribution guide:
   - [contributing.md](./contributing.md)
 
