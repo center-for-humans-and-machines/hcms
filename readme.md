@@ -25,7 +25,10 @@ Hybrid Psychiatrist-in-the-Loop Monitoring System (HPMS) for safety monitoring a
 
 ## Usage
 
-### Core workflows
+### Paper
+
+The data from the paper is available in the [`data/paper`](./data/paper/) folder and are needed to run some of the notebooks.
+There are two main scripts to run the experiments:
 
 - Generate dataset:
 
@@ -38,6 +41,8 @@ Hybrid Psychiatrist-in-the-Loop Monitoring System (HPMS) for safety monitoring a
   ```sh
   poetry run python evaluate_dataset.py --round-number=2
   ```
+
+Both scripts are executed in the [regression test pipeline](./.github/workflows/regression-test.yml) using GitHub Actions.
 
 ### Lint and tests
 
