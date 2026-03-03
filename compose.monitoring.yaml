@@ -1,6 +1,6 @@
 services:
   mongo:
-    image: mongo:7
+    image: mongo:8.2
     command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27017:27017"
@@ -8,7 +8,7 @@ services:
       - mongo_data:/data/db
 
   mongo-init-rs:
-    image: mongo:7
+    image: mongo:8.2
     depends_on:
       - mongo
     restart: "no"

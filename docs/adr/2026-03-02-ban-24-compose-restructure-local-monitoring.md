@@ -53,7 +53,7 @@ Add explicit lifecycle scripts:
 
 ### `mongo`
 
-- image: `mongo:7`
+- image: `mongo:8.2`
 - command: `--replSet rs0 --bind_ip_all`
 - port: `27017:27017`
 - persistent volume: `mongo_data`
