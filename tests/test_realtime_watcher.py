@@ -480,6 +480,23 @@ def test_compute_reconnect_sleep_seconds_grows_and_caps(monkeypatch):
     assert watcher._compute_reconnect_sleep_seconds(8) == 4.0  # pylint: disable=protected-access
 
 
+def test_compute_reconnect_sleep_seconds_large_failure_number_is_capped(monkeypatch):
+    monkeypatch.setattr(
+        "hpms.monitoring.realtime_watcher.random.uniform", lambda *_: 0.0
+    )
+
+    watcher = RealtimeConversationWatcher(
+        repository=StubRepository(),
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text: "0",
+        reconnect_backoff_base_seconds=1.0,
+        reconnect_backoff_max_seconds=30.0,
+        reconnect_backoff_jitter_seconds=0.0,
+    )
+
+    assert watcher._compute_reconnect_sleep_seconds(5000) == 30.0  # pylint: disable=protected-access
+
+
 def test_monitoring_package_import_does_not_require_moderation_credentials():
     env = os.environ.copy()
     env.pop("OPENAI_MODERATION_API_KEY", None)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
 from datetime import datetime, timezone
@@ -399,7 +400,16 @@ class RealtimeConversationWatcher:
 
     def _compute_reconnect_sleep_seconds(self, failure_number: int) -> float:
         """Compute reconnect delay using exponential backoff with jitter."""
-        exponent = max(failure_number - 1, 0)
+        raw_exponent = max(failure_number - 1, 0)
+        max_ratio = (
+            self.reconnect_backoff_max_seconds / self.reconnect_backoff_base_seconds
+        )
+        if max_ratio <= 1:
+            max_exponent = 0
+        else:
+            max_exponent = math.ceil(math.log2(max_ratio))
+
+        exponent = min(raw_exponent, max_exponent)
         base_sleep = self.reconnect_backoff_base_seconds * (2**exponent)
         bounded_sleep = min(base_sleep, self.reconnect_backoff_max_seconds)
         jitter = (
