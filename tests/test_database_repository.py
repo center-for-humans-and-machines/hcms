@@ -153,6 +153,25 @@ def test_get_backfill_targets_includes_only_messages_missing_system_flags():
     assert second.missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
 
 
+def test_get_backfill_targets_excludes_exhausted_provider_keys():
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([_conversation_doc()])
+    )
+    excluded_provider_keys = {
+        ("conversation-1", 0, SYSTEM_OPENAI_REVIEWER_ID),
+        ("conversation-1", 0, SYSTEM_LLAMA_REVIEWER_ID),
+    }
+
+    targets = repository.get_backfill_targets(
+        batch_size=1, excluded_provider_keys=excluded_provider_keys
+    )
+
+    assert len(targets) == 1
+    assert targets[0].conversation_id == "conversation-1"
+    assert targets[0].message_index == 1
+    assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
+
+
 def test_upsert_system_reviewer_flag_is_idempotent_per_message_and_provider():
     collection = FakeCollection([_conversation_doc()])
     repository = MongoConversationRepository.from_collection(collection)

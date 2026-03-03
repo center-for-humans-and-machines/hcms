@@ -111,7 +111,7 @@ def _get_default_llama_guard_rater() -> ProviderRater:
 class RealtimeConversationWatcher:
     """Watches MongoDB conversation changes and persists moderation ratings."""
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-instance-attributes
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-instance-attributes,too-many-branches
     def __init__(
         self,
         repository: MongoConversationRepository,
@@ -189,14 +189,23 @@ class RealtimeConversationWatcher:
                 )
                 time.sleep(sleep_seconds)
 
+    # pylint: disable=too-many-branches
     def run_startup_backfill(self) -> None:
         """Backfill unrated messages present before the watcher started."""
         attempts: dict[BackfillProviderKey, int] = {}
         unresolved_provider_keys: set[BackfillProviderKey] = set()
 
         while True:
+            exhausted_provider_keys = {
+                key
+                for key, attempt_count in attempts.items()
+                if attempt_count >= self.backfill_max_retries
+            }
+            unresolved_provider_keys.update(exhausted_provider_keys)
+
             targets = self.repository.get_backfill_targets(
-                batch_size=self.backfill_batch_size
+                batch_size=self.backfill_batch_size,
+                excluded_provider_keys=exhausted_provider_keys,
             )
             if not targets:
                 self._unresolved_backfill_targets = len(unresolved_provider_keys)
@@ -212,8 +221,25 @@ class RealtimeConversationWatcher:
             progress_made = False
             retry_pending = False
             for target in targets:
-                provider_results = self.process_message_target(target)
+                eligible_reviewer_ids: set[str] = set()
                 for reviewer_id in target.missing_reviewer_ids:
+                    key = (target.conversation_id, target.message_index, reviewer_id)
+                    if attempts.get(key, 0) >= self.backfill_max_retries:
+                        unresolved_provider_keys.add(key)
+                        continue
+                    eligible_reviewer_ids.add(reviewer_id)
+
+                if not eligible_reviewer_ids:
+                    continue
+
+                eligible_target = MessageBackfillTarget(
+                    conversation_id=target.conversation_id,
+                    message_index=target.message_index,
+                    content=target.content,
+                    missing_reviewer_ids=eligible_reviewer_ids,
+                )
+                provider_results = self.process_message_target(eligible_target)
+                for reviewer_id in eligible_reviewer_ids:
                     key = (target.conversation_id, target.message_index, reviewer_id)
                     if provider_results.get(reviewer_id, False):
                         attempts.pop(key, None)
@@ -249,12 +275,13 @@ class RealtimeConversationWatcher:
                 time.sleep(self.backfill_retry_sleep_seconds)
                 continue
 
-            self._unresolved_backfill_targets = len(unresolved_provider_keys)
-            LOGGER.error(
-                "Startup backfill stopped with unresolved provider target(s): %d",
-                self._unresolved_backfill_targets,
+            LOGGER.warning(
+                "Startup backfill made no progress in current batch; continuing scan "
+                "with exhausted provider target(s) excluded"
             )
-            return
+            continue
+
+    # pylint: enable=too-many-branches
 
     def handle_change_event(self, change_event: dict[str, Any]) -> None:
         """Handle one MongoDB change stream event."""

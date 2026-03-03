@@ -96,10 +96,13 @@ class MongoConversationRepository:
         return missing
 
     def get_backfill_targets(
-        self, batch_size: int = 200
+        self,
+        batch_size: int = 200,
+        excluded_provider_keys: Optional[Set[tuple[Any, int, str]]] = None,
     ) -> list[MessageBackfillTarget]:
         """Find messages that still need one or both system moderation writes."""
         targets: list[MessageBackfillTarget] = []
+        excluded_provider_keys = excluded_provider_keys or set()
 
         cursor = self.collection.find(
             {},
@@ -136,6 +139,12 @@ class MongoConversationRepository:
                     continue
 
                 missing = self.missing_system_reviewers(message)
+                missing = {
+                    reviewer_id
+                    for reviewer_id in missing
+                    if (conversation_id, message_index, reviewer_id)
+                    not in excluded_provider_keys
+                }
                 if not missing:
                     continue
 

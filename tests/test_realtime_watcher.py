@@ -52,8 +52,13 @@ class StubRepository:
             by_alias=True
         )
 
-    def get_backfill_targets(self, batch_size: int):
+    def get_backfill_targets(
+        self,
+        batch_size: int,
+        excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
+    ):
         _ = batch_size
+        _ = excluded_provider_keys
         if not self.backfill_batches:
             return []
         return self.backfill_batches.pop(0)
@@ -77,6 +82,89 @@ class StubRepository:
                 category_other=category_other,
             )
         )
+
+
+@dataclass
+class FilteringStubRepository(StubRepository):
+    """In-memory repository that filters exhausted provider keys per fetch."""
+
+    targets: list[MessageBackfillTarget] = field(default_factory=list)
+
+    def get_backfill_targets(
+        self,
+        batch_size: int,
+        excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
+    ):
+        excluded_provider_keys = excluded_provider_keys or set()
+        eligible_targets: list[MessageBackfillTarget] = []
+
+        for target in self.targets:
+            remaining_reviewer_ids = {
+                reviewer_id
+                for reviewer_id in target.missing_reviewer_ids
+                if (
+                    target.conversation_id,
+                    target.message_index,
+                    reviewer_id,
+                )
+                not in excluded_provider_keys
+            }
+            if not remaining_reviewer_ids:
+                continue
+
+            eligible_targets.append(
+                MessageBackfillTarget(
+                    conversation_id=target.conversation_id,
+                    message_index=target.message_index,
+                    content=target.content,
+                    missing_reviewer_ids=remaining_reviewer_ids,
+                )
+            )
+            if len(eligible_targets) >= batch_size:
+                break
+
+        return eligible_targets
+
+    def upsert_system_reviewer_flag(
+        self,
+        conversation_id: Any,
+        message_index: int,
+        reviewer_id: str,
+        categories: list[str],
+        category_other: str,
+        created_at,
+    ):
+        super().upsert_system_reviewer_flag(
+            conversation_id=conversation_id,
+            message_index=message_index,
+            reviewer_id=reviewer_id,
+            categories=categories,
+            category_other=category_other,
+            created_at=created_at,
+        )
+
+        updated_targets: list[MessageBackfillTarget] = []
+        for target in self.targets:
+            if (
+                target.conversation_id != conversation_id
+                or target.message_index != message_index
+            ):
+                updated_targets.append(target)
+                continue
+
+            remaining_reviewer_ids = set(target.missing_reviewer_ids)
+            remaining_reviewer_ids.discard(reviewer_id)
+            if remaining_reviewer_ids:
+                updated_targets.append(
+                    MessageBackfillTarget(
+                        conversation_id=target.conversation_id,
+                        message_index=target.message_index,
+                        content=target.content,
+                        missing_reviewer_ids=remaining_reviewer_ids,
+                    )
+                )
+
+        self.targets = updated_targets
 
 
 def _message(content: str, reviewer_flags: list[dict[str, Any]]):
@@ -412,7 +500,126 @@ def test_run_startup_backfill_stops_after_retry_budget_exhausted():
 
     assert len(repository.calls) == 0
     assert watcher._unresolved_backfill_targets == 1  # pylint: disable=protected-access
-    assert len(repository.backfill_batches) == 1
+    assert len(repository.backfill_batches) == 0
+
+
+def test_run_startup_backfill_skips_exhausted_keys_while_progress_continues():
+    openai_calls = {"count": 0}
+
+    def always_failing_openai(_text: str):
+        openai_calls["count"] += 1
+        raise RuntimeError("always fail")
+
+    repository = StubRepository(
+        backfill_batches=[
+            [
+                MessageBackfillTarget(
+                    conversation_id="conversation-fail",
+                    message_index=0,
+                    content="fail",
+                    missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+                ),
+                MessageBackfillTarget(
+                    conversation_id="conversation-ok-1",
+                    message_index=0,
+                    content="ok",
+                    missing_reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+                ),
+            ],
+            [
+                MessageBackfillTarget(
+                    conversation_id="conversation-fail",
+                    message_index=0,
+                    content="fail",
+                    missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+                ),
+                MessageBackfillTarget(
+                    conversation_id="conversation-ok-2",
+                    message_index=0,
+                    content="ok",
+                    missing_reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+                ),
+            ],
+            [
+                MessageBackfillTarget(
+                    conversation_id="conversation-fail",
+                    message_index=0,
+                    content="fail",
+                    missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+                ),
+                MessageBackfillTarget(
+                    conversation_id="conversation-ok-3",
+                    message_index=0,
+                    content="ok",
+                    missing_reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+                ),
+            ],
+            [],
+        ]
+    )
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=always_failing_openai,
+        llama_guard_rater=lambda _text: "0",
+        backfill_max_retries=2,
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.run_startup_backfill()
+
+    assert openai_calls["count"] == 2
+    assert watcher._unresolved_backfill_targets == 1  # pylint: disable=protected-access
+    llama_calls = [
+        call
+        for call in repository.calls
+        if call.reviewer_id == SYSTEM_LLAMA_REVIEWER_ID
+    ]
+    assert len(llama_calls) == 3
+
+
+def test_run_startup_backfill_batch_size_one_processes_later_targets_after_exhaustion():
+    openai_calls = {"count": 0}
+
+    def always_failing_openai(_text: str):
+        openai_calls["count"] += 1
+        raise RuntimeError("always fail")
+
+    repository = FilteringStubRepository(
+        targets=[
+            MessageBackfillTarget(
+                conversation_id="conversation-fail",
+                message_index=0,
+                content="fail",
+                missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+            ),
+            MessageBackfillTarget(
+                conversation_id="conversation-ok",
+                message_index=1,
+                content="ok",
+                missing_reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+            ),
+        ]
+    )
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=always_failing_openai,
+        llama_guard_rater=lambda _text: "0",
+        backfill_batch_size=1,
+        backfill_max_retries=1,
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.run_startup_backfill()
+
+    assert openai_calls["count"] == 1
+    assert watcher._unresolved_backfill_targets == 1  # pylint: disable=protected-access
+    assert any(
+        call.conversation_id == "conversation-ok"
+        and call.reviewer_id == SYSTEM_LLAMA_REVIEWER_ID
+        for call in repository.calls
+    )
 
 
 def test_failure_is_retried_on_later_attempt():
