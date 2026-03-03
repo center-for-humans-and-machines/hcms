@@ -71,6 +71,16 @@ Use these lifecycle scripts for local MongoDB + watcher:
   ./script/destroy-monitoring
   ```
 
+Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
+
+```text
+mongodb://localhost:27017/?directConnection=true
+```
+
+Note: the local replica set member is advertised as `mongo:27017` inside Docker.
+From the host machine, use `directConnection=true` to avoid hostname resolution
+errors for `mongo`.
+
 ## Documentation
 
 - Architecture Decision Record (ADR) for compose split and local monitoring stack: [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local-monitoring.md)
