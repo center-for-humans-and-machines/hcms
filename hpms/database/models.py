@@ -22,9 +22,9 @@ class UserFlagDocument(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    category: str = Field(...)
-    category_other: str = Field(...)
-    reviews: List[UserFlagReviewDocument] = Field(...)
+    category: str = ""
+    category_other: str = ""
+    reviews: List[UserFlagReviewDocument] = Field(default_factory=list)
 
 
 class ReviewerFlagDocument(BaseModel):
@@ -47,7 +47,7 @@ class MessageDocument(BaseModel):
     role: str = Field(..., min_length=1)
     timestamp: datetime
     type: str = Field(..., min_length=1)
-    user_flag: UserFlagDocument = Field(...)
+    user_flag: UserFlagDocument = Field(default_factory=UserFlagDocument)
     reviewer_flags: List[ReviewerFlagDocument] = Field(...)
 
 

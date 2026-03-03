@@ -180,6 +180,9 @@ A message requires processing if either of the following does not exist in `revi
 - `reviewer_id = "system_openai_moderation"`
 - `reviewer_id = "system_llama_guard"`
 
+Validation tolerance:
+- if `messages[].user_flag` is missing, watcher defaults it to an empty object (`category=""`, `category_other=""`, `reviews=[]`) before processing.
+
 ### OpenAI normalization
 Input: list from `_rate_text_with_openai_moderation`.
 - Collect non-zero/string category entries into `categories`.

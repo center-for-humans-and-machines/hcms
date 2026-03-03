@@ -200,3 +200,40 @@ def test_get_backfill_targets_skips_invalid_conversations():
 
     assert len(targets) == 2
     assert all(target.conversation_id == "conversation-1" for target in targets)
+
+
+def test_get_backfill_targets_defaults_missing_user_flag():
+    now = datetime.now(timezone.utc)
+    conversation_missing_user_flag = {
+        "_id": "conversation-missing-user-flag",
+        "participant_id": "p2",
+        "model": "test-model",
+        "experiment_id": "exp-2",
+        "created_at": now,
+        "messages": [
+            {
+                "content": "message without user flag",
+                "role": "assistant",
+                "timestamp": now,
+                "type": "assistant",
+                "reviewer_flags": [],
+            }
+        ],
+        "opened_by": [],
+        "reviewed_by": [],
+        "assigned_to": [],
+    }
+
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation_missing_user_flag])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 1
+    assert targets[0].conversation_id == "conversation-missing-user-flag"
+    assert targets[0].message_index == 0
+    assert targets[0].missing_reviewer_ids == {
+        SYSTEM_OPENAI_REVIEWER_ID,
+        SYSTEM_LLAMA_REVIEWER_ID,
+    }
