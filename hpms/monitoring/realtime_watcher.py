@@ -154,8 +154,7 @@ class RealtimeConversationWatcher:
         self._unresolved_backfill_targets = 0
 
     def run(self) -> None:
-        """Run startup backfill once, then keep processing change events."""
-        self.run_startup_backfill()
+        """Open change stream first, then backfill and process realtime events."""
 
         consecutive_failures = 0
         while True:
@@ -169,6 +168,10 @@ class RealtimeConversationWatcher:
                             consecutive_failures,
                         )
                     consecutive_failures = 0
+
+                    # Start the stream first to avoid a blind startup window between
+                    # the final backfill query and stream establishment.
+                    self.run_startup_backfill()
 
                     for change_event in stream:
                         self.handle_change_event(change_event)

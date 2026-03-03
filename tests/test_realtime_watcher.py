@@ -4,11 +4,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import os
 import subprocess
 import sys
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
 
 from hpms.database.models import ConversationDocument
 from hpms.database.repository import (
@@ -499,3 +503,45 @@ def test_monitoring_package_import_does_not_require_moderation_credentials():
 
     assert result.returncode == 0
     assert "ok" in result.stdout
+
+
+def test_run_opens_change_stream_before_startup_backfill(monkeypatch):
+    event_order: list[str] = []
+
+    def _stream_iter():
+        yield {"operationType": "insert", "fullDocument": {}}
+        raise KeyboardInterrupt()
+
+    @contextmanager
+    def _watch_context():
+        event_order.append("watch_enter")
+        yield _stream_iter()
+
+    def _watch(max_await_time_ms):
+        _ = max_await_time_ms
+        event_order.append("watch_called")
+        return _watch_context()
+
+    watcher = RealtimeConversationWatcher(
+        repository=cast(Any, SimpleNamespace(watch=_watch)),
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text: "0",
+    )
+
+    monkeypatch.setattr(
+        watcher,
+        "run_startup_backfill",
+        lambda: event_order.append("backfill_called"),
+    )
+    monkeypatch.setattr(
+        watcher,
+        "handle_change_event",
+        lambda _change_event: event_order.append("event_handled"),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        watcher.run()
+
+    assert event_order.index("watch_called") < event_order.index("backfill_called")
+    assert event_order.index("watch_enter") < event_order.index("backfill_called")
+    assert event_order.index("backfill_called") < event_order.index("event_handled")
