@@ -22,4 +22,7 @@ RUN poetry config virtualenvs.create false \
 
 COPY . .
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import hpms.database.models, pymongo, pydantic" || exit 1
+
 CMD ["python", "watch_mongo_conversations.py"]

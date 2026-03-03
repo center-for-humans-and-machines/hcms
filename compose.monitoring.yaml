@@ -4,6 +4,16 @@ services:
   mongo:
     image: mongo:8.2
     command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet mongodb://localhost:27017 --eval \"quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)\"",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     ports:
       - "27017:27017"
     volumes:
@@ -12,7 +22,8 @@ services:
   mongo-init-rs:
     image: mongo:8.2
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     restart: "no"
     entrypoint: ["bash", "-lc"]
     command: >
@@ -39,10 +50,20 @@ services:
       dockerfile: Dockerfile.monitoring
     depends_on:
       mongo:
-        condition: service_started
+        condition: service_healthy
       mongo-init-rs:
         condition: service_completed_successfully
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os; from pymongo import MongoClient; MongoClient(os.environ['MONGODB_URI'], serverSelectionTimeoutMS=2000).admin.command('ping')\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     environment:
       MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
       MONGODB_DATABASE: hpms_local
