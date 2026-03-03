@@ -79,8 +79,7 @@ Use these lifecycle scripts for local MongoDB + watcher:
   - [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime-monitoring.md)
 - Paper data workflow:
   - [paper-data-workflow.md](./docs/paper-data-workflow.md)
-- Contribution guide:
-  - [contributing.md](./contributing.md)
+- Contribution guide: [contributing.md](./contributing.md)
 
 ## Related
 
