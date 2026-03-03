@@ -40,11 +40,6 @@ Add a dedicated watcher image build definition:
   - installs Poetry and project dependencies
   - runs `poetry run python watch_mongo_conversations.py`
 
-Add a convenience script:
-
-- `script/monitoring-local`
-  - compatibility wrapper delegating to `./script/start-monitoring`
-
 Add explicit lifecycle scripts:
 
 - `script/start-monitoring`

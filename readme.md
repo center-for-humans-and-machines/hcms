@@ -86,10 +86,6 @@ Use these lifecycle scripts for local MongoDB + watcher:
   ./script/destroy-monitoring
   ```
 
-Compatibility wrapper:
-
-- `./script/monitoring-local` delegates to `./script/start-monitoring`.
-
 ## Documentation
 
 - ADR for compose split and local monitoring stack:
