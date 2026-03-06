@@ -9,7 +9,8 @@ This repository deploys the monitoring `watcher` service through GitHub Actions 
 - Composite action (deploy): [`../.github/actions/deploy-helm/action.yml`](../.github/actions/deploy-helm/action.yml)
 - Helm chart: [`../kubernetes/worker-service`](../kubernetes/worker-service)
 
-The workflow runs build and deploy pipelines for `watcher` and then writes a deployment summary.
+The workflow builds the `watcher` image, deploys it only if the build succeeds,
+and then writes a deployment summary.
 
 ## Branches and Triggers
 
@@ -38,7 +39,7 @@ The `watcher` service follows this flow:
 1. Resolve deterministic app/image naming (`<APP_NAME>-watcher-<branch>`).
 1. Build and push Docker image from `Dockerfile.monitoring`.
 1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
-1. Deploy with local `deploy-helm` composite action.
+1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
 
 ### Runtime deployment variables
 
@@ -120,6 +121,9 @@ The final `deployment-summary` job always runs and writes one watcher row with:
 - deploy status
 - branch
 - image tag and full image reference
+
+If the build fails, the deploy job is skipped and the summary still reports the
+failed build alongside a skipped deployment.
 
 ## Troubleshooting
 
