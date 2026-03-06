@@ -103,6 +103,7 @@ errors for `mongo`.
 - Architecture Decision Record (ADR) for compose split and local monitoring stack: [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local-monitoring.md)
 - ADR for Mongo schema alignment and realtime watcher: [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime-monitoring.md)
 - Paper data workflow: [paper-data-workflow.md](./docs/paper-data-workflow.md)
+- CI/CD deployment: [ci-cd-deployment.md](./docs/ci-cd-deployment.md)
 - Contribution guide: [contributing.md](./contributing.md)
 
 ## Related

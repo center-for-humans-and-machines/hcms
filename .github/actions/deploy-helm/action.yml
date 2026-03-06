@@ -1,0 +1,130 @@
+name: Deploy with Helm
+description: Deploy watcher worker to Kubernetes using Helm charts
+
+inputs:
+  app-name:
+    description: Application name
+    required: true
+  image-name:
+    description: Docker image name with tag
+    required: true
+  namespace:
+    description: Kubernetes namespace
+    required: true
+    default: elderbot
+  replica-count:
+    description: Number of replicas
+    required: false
+    default: "1"
+  deployment-vars:
+    description: Path to deployment variables YAML file
+    required: false
+    default: /tmp/deployment_vars.yml
+  kubeconfig:
+    description: Base64 encoded kubeconfig
+    required: true
+  dockercfg:
+    description: Base64 encoded Docker config JSON
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure Kubernetes access
+      shell: bash
+      env:
+        KUBECONFIG_INPUT: ${{ inputs.kubeconfig }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${KUBECONFIG_INPUT}" ]]; then
+          echo "KUBECONFIG input is empty. Check the KUBECONFIG secret." >&2
+          exit 1
+        fi
+
+        # Support both base64-encoded kubeconfig and raw YAML kubeconfig.
+        if ! printf "%s" "${KUBECONFIG_INPUT}" | base64 -d > kubeconfig 2>/dev/null; then
+          printf "%s" "${KUBECONFIG_INPUT}" > kubeconfig
+        fi
+
+        if [[ ! -s kubeconfig ]]; then
+          echo "Generated kubeconfig file is empty." >&2
+          exit 1
+        fi
+
+        if ! grep -q '^apiVersion:' kubeconfig; then
+          echo "Generated kubeconfig does not look valid (missing apiVersion)." >&2
+          exit 1
+        fi
+
+        if grep -Eq 'server:[[:space:]]*https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:[0-9]+)?([[:space:]]|$)' kubeconfig; then
+          echo "Kubeconfig points to localhost. Check KUBECONFIG cluster server." >&2
+          exit 1
+        fi
+
+        chmod 400 kubeconfig
+
+    - name: Install Helm
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+    - name: Validate Helm chart files
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        chart_dir="kubernetes/worker-service"
+        required_files=(
+          "$chart_dir/Chart.yaml"
+          "$chart_dir/values.yaml"
+          "$chart_dir/templates/deployment.yml"
+        )
+
+        for file in "${required_files[@]}"; do
+          if [[ ! -f "$file" ]]; then
+            echo "Error: required file not found: $file" >&2
+            exit 1
+          fi
+        done
+
+    - name: Deploy with Helm
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        chart_dir="kubernetes/worker-service"
+        helm_args=(
+          --set "app_name=${{ inputs.app-name }}"
+          --set "app_image=${{ inputs.image-name }}"
+          --set-string "dockersecret=${{ inputs.dockercfg }}"
+          --set "replica_count=${{ inputs.replica-count }}"
+        )
+
+        if [[ -n "${{ inputs.deployment-vars }}" && -f "${{ inputs.deployment-vars }}" ]]; then
+          helm_args+=(--values "${{ inputs.deployment-vars }}")
+        fi
+
+        helm upgrade \
+          --install \
+          --namespace "${{ inputs.namespace }}" \
+          --create-namespace \
+          "${{ inputs.app-name }}" \
+          "$chart_dir" \
+          "${helm_args[@]}" \
+          --atomic \
+          --kubeconfig kubeconfig
+
+    - name: Output deployment summary
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        {
+          echo "### ${{ inputs.app-name }} deployment"
+          echo
+          echo "- Status: success"
+          echo "- Docker image: \`${{ inputs.image-name }}\`"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"

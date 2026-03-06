@@ -1,0 +1,8 @@
+resources:
+  requests: {}
+  limits: {}
+app_name: ""
+app_image: ""
+dockersecret: ""
+replica_count: 1
+deployment_vars: {}

@@ -1,0 +1,4 @@
+apiVersion: v2
+name: worker-service
+description: Deploy a background worker
+version: 1.0.0
