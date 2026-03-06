@@ -1,0 +1,78 @@
+name: Resolve Service Variables
+description: Resolve deterministic deployment variables for the watcher service
+
+inputs:
+  service:
+    description: Service name (watcher)
+    required: true
+  app-name-prefix:
+    description: Base application name prefix
+    required: true
+  registry:
+    description: Container registry host
+    required: true
+  docker-registry-prefix:
+    description: Registry namespace/prefix
+    required: true
+  branch:
+    description: Git branch name (dev or main)
+    required: true
+  sha:
+    description: Git commit SHA
+    required: true
+
+outputs:
+  app_name:
+    description: Kubernetes app name
+    value: ${{ steps.resolve.outputs.app_name }}
+  image_name:
+    description: Image name without registry/tag
+    value: ${{ steps.resolve.outputs.image_name }}
+  image_tag:
+    description: Short image tag derived from SHA
+    value: ${{ steps.resolve.outputs.image_tag }}
+  full_image:
+    description: Fully qualified image reference
+    value: ${{ steps.resolve.outputs.full_image }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        service="${{ inputs.service }}"
+        branch="${{ inputs.branch }}"
+        sha="${{ inputs.sha }}"
+
+        case "$service" in
+          watcher)
+            ;;
+          *)
+            echo "Unsupported service: ${service}. Expected watcher." >&2
+            exit 1
+            ;;
+        esac
+
+        case "$branch" in
+          dev|main)
+            ;;
+          *)
+            echo "Unsupported branch: ${branch}. Expected dev or main." >&2
+            exit 1
+            ;;
+        esac
+
+        app_name="${{ inputs.app-name-prefix }}-${service}-${branch}"
+        image_name="${app_name}"
+        image_tag="${sha::7}"
+        full_image="${{ inputs.registry }}/${{ inputs.docker-registry-prefix }}/${image_name}:${image_tag}"
+
+        {
+          echo "app_name=${app_name}"
+          echo "image_name=${image_name}"
+          echo "image_tag=${image_tag}"
+          echo "full_image=${full_image}"
+        } >> "$GITHUB_OUTPUT"

@@ -1,0 +1,411 @@
+name: Deployment
+
+on:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ${{ vars.GITLAB_REGISTRY }}
+  DOCKER_REGISTRY_PREFIX: ${{ vars.DOCKER_REGISTRY_PREFIX || 'mpib/chm/common/base-images' }}
+  NAMESPACE: ${{ vars.K8S_NAMESPACE || 'elderbot' }}
+
+jobs:
+  build-images:
+    name: Build Image (${{ matrix.service }})
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: watcher
+            build_context: .
+            dockerfile: Dockerfile.monitoring
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve service variables
+        id: vars
+        uses: ./.github/actions/resolve-service-vars
+        with:
+          service: ${{ matrix.service }}
+          app-name-prefix: ${{ vars.APP_NAME }}
+          registry: ${{ env.REGISTRY }}
+          docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
+          branch: ${{ github.ref_name }}
+          sha: ${{ github.sha }}
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.GITLAB_REGISTRY_USERNAME }}
+          password: ${{ secrets.GITLAB_REGISTRY_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.build_context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.vars.outputs.full_image }}
+          provenance: false
+
+      - name: Write build metadata
+        if: always()
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+          BRANCH: ${{ github.ref_name }}
+          BUILD_STATUS: ${{ job.status }}
+          APP_NAME: ${{ steps.vars.outputs.app_name }}
+          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+          FULL_IMAGE: ${{ steps.vars.outputs.full_image }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p build-meta
+
+          {
+            echo "service=${SERVICE}"
+            echo "branch=${BRANCH}"
+            echo "build_status=${BUILD_STATUS}"
+            echo "app_name=${APP_NAME:-n/a}"
+            echo "image_name=${IMAGE_NAME:-n/a}"
+            echo "image_tag=${IMAGE_TAG:-n/a}"
+            echo "full_image=${FULL_IMAGE:-n/a}"
+          } > "build-meta/${SERVICE}.env"
+
+      - name: Upload build metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-meta-${{ matrix.service }}
+          path: build-meta/${{ matrix.service }}.env
+          if-no-files-found: error
+
+  deploy-services:
+    name: Deploy Service (${{ matrix.service }})
+    runs-on: self-hosted
+    needs: build-images
+    if: always()
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - service: watcher
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build metadata
+        id: download_build_meta
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: build-meta-${{ matrix.service }}
+          path: build-meta
+
+      - name: Evaluate build result
+        id: build_gate
+        if: always()
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+
+          file="build-meta/${SERVICE}.env"
+          should_deploy="false"
+          build_status="failure"
+          branch="${GITHUB_REF_NAME}"
+          image_tag="n/a"
+          full_image="n/a"
+
+          if [[ -f "$file" ]]; then
+            read_meta_value() {
+              local key="$1"
+              awk -F= -v k="$key" '$1 == k { print substr($0, index($0, "=") + 1); exit }' "$file"
+            }
+
+            build_status="$(read_meta_value build_status)"
+            branch="$(read_meta_value branch)"
+            image_tag="$(read_meta_value image_tag)"
+            full_image="$(read_meta_value full_image)"
+          else
+            echo "Missing build metadata file: $file" >&2
+          fi
+
+          build_status="${build_status:-failure}"
+          branch="${branch:-${GITHUB_REF_NAME}}"
+          image_tag="${image_tag:-n/a}"
+          full_image="${full_image:-n/a}"
+
+          if [[ "$build_status" == "success" ]]; then
+            should_deploy="true"
+          fi
+
+          {
+            echo "should_deploy=${should_deploy}"
+            echo "build_status=${build_status}"
+            echo "branch=${branch}"
+            echo "image_tag=${image_tag}"
+            echo "full_image=${full_image}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve service variables
+        id: vars
+        if: steps.build_gate.outputs.should_deploy == 'true'
+        uses: ./.github/actions/resolve-service-vars
+        with:
+          service: ${{ matrix.service }}
+          app-name-prefix: ${{ vars.APP_NAME }}
+          registry: ${{ env.REGISTRY }}
+          docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
+          branch: ${{ github.ref_name }}
+          sha: ${{ github.sha }}
+
+      - name: Create watcher deployment variables
+        if: steps.build_gate.outputs.should_deploy == 'true' && matrix.service == 'watcher'
+        shell: bash
+        env:
+          MONGODB_URI_DEV: ${{ secrets.MONGODB_URI_DEV }}
+          MONGODB_URI_MAIN: ${{ secrets.MONGODB_URI_MAIN }}
+          MONGODB_DATABASE_DEV: ${{ vars.MONGODB_DATABASE_DEV }}
+          MONGODB_DATABASE_MAIN: ${{ vars.MONGODB_DATABASE_MAIN }}
+          OPENAI_MODERATION_API_KEY: ${{ secrets.OPENAI_MODERATION_API_KEY }}
+          LLAMA_GUARD_API_KEY: ${{ secrets.LLAMA_GUARD_API_KEY }}
+          LLAMA_GUARD_ENDPOINT: ${{ vars.LLAMA_GUARD_ENDPOINT }}
+          MONGODB_COLLECTION: ${{ vars.MONGODB_COLLECTION || 'Conversations' }}
+          MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: ${{ vars.MONGODB_CHANGE_STREAM_MAX_AWAIT_MS || '1000' }}
+          MONGODB_BACKFILL_BATCH_SIZE: ${{ vars.MONGODB_BACKFILL_BATCH_SIZE || '200' }}
+          MONGODB_BACKFILL_MAX_RETRIES: ${{ vars.MONGODB_BACKFILL_MAX_RETRIES || '10' }}
+          MONGODB_BACKFILL_RETRY_SLEEP_SECONDS: ${{ vars.MONGODB_BACKFILL_RETRY_SLEEP_SECONDS || '2' }}
+          MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_BASE_SECONDS || '1' }}
+          MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_MAX_SECONDS || '30' }}
+          MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS || '0.25' }}
+          HPMS_LOG_LEVEL: ${{ vars.HPMS_LOG_LEVEL || 'INFO' }}
+        run: |
+          set -euo pipefail
+
+          branch="${GITHUB_REF##*/}"
+          case "$branch" in
+            dev)
+              mongodb_uri="$MONGODB_URI_DEV"
+              mongodb_database="$MONGODB_DATABASE_DEV"
+              ;;
+            main)
+              mongodb_uri="$MONGODB_URI_MAIN"
+              mongodb_database="$MONGODB_DATABASE_MAIN"
+              ;;
+            *)
+              echo "Unsupported branch: ${branch}" >&2
+              exit 1
+              ;;
+          esac
+
+          [[ -n "$mongodb_uri" ]] || {
+            echo "Missing MongoDB URI for branch: ${branch}" >&2
+            exit 1
+          }
+          [[ -n "$mongodb_database" ]] || {
+            echo "Missing MongoDB database for branch: ${branch}" >&2
+            exit 1
+          }
+          [[ -n "$OPENAI_MODERATION_API_KEY" ]] || {
+            echo "Missing OPENAI_MODERATION_API_KEY secret" >&2
+            exit 1
+          }
+          [[ -n "$LLAMA_GUARD_API_KEY" ]] || {
+            echo "Missing LLAMA_GUARD_API_KEY secret" >&2
+            exit 1
+          }
+          [[ -n "$LLAMA_GUARD_ENDPOINT" ]] || {
+            echo "Missing LLAMA_GUARD_ENDPOINT variable" >&2
+            exit 1
+          }
+
+          cat > /tmp/deployment_vars.yml <<EOV
+          deployment_vars:
+            MONGODB_URI: "$mongodb_uri"
+            MONGODB_DATABASE: "$mongodb_database"
+            MONGODB_COLLECTION: "$MONGODB_COLLECTION"
+            MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "$MONGODB_CHANGE_STREAM_MAX_AWAIT_MS"
+            MONGODB_BACKFILL_BATCH_SIZE: "$MONGODB_BACKFILL_BATCH_SIZE"
+            MONGODB_BACKFILL_MAX_RETRIES: "$MONGODB_BACKFILL_MAX_RETRIES"
+            MONGODB_BACKFILL_RETRY_SLEEP_SECONDS: "$MONGODB_BACKFILL_RETRY_SLEEP_SECONDS"
+            MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: "$MONGODB_RECONNECT_BACKOFF_BASE_SECONDS"
+            MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: "$MONGODB_RECONNECT_BACKOFF_MAX_SECONDS"
+            MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "$MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS"
+            HPMS_LOG_LEVEL: "$HPMS_LOG_LEVEL"
+            OPENAI_MODERATION_API_KEY: "$OPENAI_MODERATION_API_KEY"
+            LLAMA_GUARD_API_KEY: "$LLAMA_GUARD_API_KEY"
+            LLAMA_GUARD_ENDPOINT: "$LLAMA_GUARD_ENDPOINT"
+          EOV
+
+      - name: Deploy with Helm
+        id: deploy
+        if: steps.build_gate.outputs.should_deploy == 'true'
+        uses: ./.github/actions/deploy-helm
+        with:
+          app-name: ${{ steps.vars.outputs.app_name }}
+          image-name: ${{ steps.vars.outputs.full_image }}
+          namespace: ${{ env.NAMESPACE }}
+          replica-count: ${{ vars.WATCHER_REPLICA_COUNT || '1' }}
+          deployment-vars: /tmp/deployment_vars.yml
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+          dockercfg: ${{ secrets.DOCKERCFG }}
+
+      - name: Write deploy metadata
+        if: always()
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+          BRANCH: ${{ github.ref_name }}
+          GATE_BRANCH: ${{ steps.build_gate.outputs.branch }}
+          BUILD_STATUS: ${{ steps.build_gate.outputs.build_status }}
+          SHOULD_DEPLOY: ${{ steps.build_gate.outputs.should_deploy }}
+          BUILD_IMAGE_TAG: ${{ steps.build_gate.outputs.image_tag }}
+          BUILD_FULL_IMAGE: ${{ steps.build_gate.outputs.full_image }}
+          RESOLVED_IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+          RESOLVED_FULL_IMAGE: ${{ steps.vars.outputs.full_image }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p deploy-meta
+
+          deploy_status="skipped"
+          if [[ "${SHOULD_DEPLOY:-false}" == "true" ]]; then
+            case "${DEPLOY_OUTCOME:-}" in
+              success)
+                deploy_status="success"
+                ;;
+              failure)
+                deploy_status="failure"
+                ;;
+              cancelled)
+                deploy_status="cancelled"
+                ;;
+              skipped|"")
+                deploy_status="failure"
+                ;;
+              *)
+                deploy_status="${DEPLOY_OUTCOME}"
+                ;;
+            esac
+          fi
+
+          branch="${GATE_BRANCH:-${BRANCH}}"
+          image_tag="${BUILD_IMAGE_TAG:-n/a}"
+          full_image="${BUILD_FULL_IMAGE:-n/a}"
+
+          if [[ "${SHOULD_DEPLOY:-false}" == "true" ]]; then
+            image_tag="${RESOLVED_IMAGE_TAG:-${image_tag}}"
+            full_image="${RESOLVED_FULL_IMAGE:-${full_image}}"
+          fi
+
+          {
+            echo "service=${SERVICE}"
+            echo "branch=${branch}"
+            echo "build_status=${BUILD_STATUS:-failure}"
+            echo "deploy_status=${deploy_status}"
+            echo "should_deploy=${SHOULD_DEPLOY:-false}"
+            echo "image_tag=${image_tag}"
+            echo "full_image=${full_image}"
+          } > "deploy-meta/${SERVICE}.env"
+
+      - name: Upload deploy metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-meta-${{ matrix.service }}
+          path: deploy-meta/${{ matrix.service }}.env
+          if-no-files-found: error
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: self-hosted
+    needs: [build-images, deploy-services]
+    if: always()
+
+    steps:
+      - name: Download deployment metadata
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: deploy-meta-*
+          path: deploy-meta
+          merge-multiple: true
+
+      - name: Write summary
+        shell: bash
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          status_icon() {
+            case "$1" in
+              success) echo "[ok]" ;;
+              failure) echo "[fail]" ;;
+              cancelled) echo "[cancelled]" ;;
+              skipped) echo "[skipped]" ;;
+              *) echo "[unknown]" ;;
+            esac
+          }
+
+          read_meta_value() {
+            local file="$1"
+            local key="$2"
+
+            if [[ ! -f "$file" ]]; then
+              return
+            fi
+
+            awk -F= -v k="$key" '$1 == k { print substr($0, index($0, "=") + 1); exit }' "$file"
+          }
+
+          file="deploy-meta/watcher.env"
+          branch="${BRANCH}"
+          build_status="unknown"
+          deploy_status="unknown"
+          image_tag="n/a"
+          full_image="n/a"
+
+          if [[ -f "$file" ]]; then
+            branch="$(read_meta_value "$file" branch)"
+            build_status="$(read_meta_value "$file" build_status)"
+            deploy_status="$(read_meta_value "$file" deploy_status)"
+            image_tag="$(read_meta_value "$file" image_tag)"
+            full_image="$(read_meta_value "$file" full_image)"
+          fi
+
+          branch="${branch:-${BRANCH}}"
+          build_status="${build_status:-unknown}"
+          deploy_status="${deploy_status:-unknown}"
+          image_tag="${image_tag:-n/a}"
+          full_image="${full_image:-n/a}"
+
+          {
+            echo "## Deployment Summary"
+            echo
+            echo "| Service | Build Status | Deploy Status | Branch | Image Tag | Image |"
+            echo "|---------|--------------|---------------|--------|-----------|-------|"
+            echo "| Watcher | $(status_icon "$build_status") ${build_status} | $(status_icon "$deploy_status") ${deploy_status} | ${branch} | \`${image_tag}\` | \`${full_image}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
