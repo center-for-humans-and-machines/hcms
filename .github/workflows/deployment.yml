@@ -187,7 +187,7 @@ jobs:
           if [[ "$MODEL_ENDPOINT" == *azure* && -z "$MODEL_API_VERSION" ]]; then
             echo "Missing MODEL_API_VERSION variable for Azure endpoint" >&2
             exit 1
-          }
+          fi
           [[ -n "$mongodb_uri" ]] || {
             echo "Missing MongoDB URI for branch: ${branch}" >&2
             exit 1
