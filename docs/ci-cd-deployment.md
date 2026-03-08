@@ -43,7 +43,12 @@ The `watcher` service follows this flow:
 
 ### Runtime deployment variables
 
-The workflow writes this contract into `/tmp/deployment_vars.yml`:
+The watcher requires two groups of runtime environment variables:
+
+1. Variables currently written by the workflow into `/tmp/deployment_vars.yml`
+1. Additional model configuration variables required by the monitoring import path at startup
+
+The workflow currently writes this contract into `/tmp/deployment_vars.yml`:
 
 Required values:
 
@@ -52,6 +57,20 @@ Required values:
 - `OPENAI_MODERATION_API_KEY`
 - `LLAMA_GUARD_API_KEY`
 - `LLAMA_GUARD_ENDPOINT`
+
+Additional required watcher runtime values:
+
+- `MODEL_API_KEY`
+- `MODEL_ENDPOINT`
+- `CHAT_COMPLETIONS_MODEL_NAME`
+
+Provider-specific requirement:
+
+- `MODEL_API_VERSION` when `MODEL_ENDPOINT` is an Azure OpenAI endpoint
+
+The current deployment workflow does not populate these model variables in
+`/tmp/deployment_vars.yml`, so the watcher can fail during import/startup with
+errors such as `Set the environment variable MODEL_API_KEY`.
 
 Optional values with defaults:
 
@@ -72,6 +91,8 @@ Optional values with defaults:
 | `GITLAB_REGISTRY` | Docker registry host |
 | `APP_NAME` | Application name prefix used in image/release naming |
 | `LLAMA_GUARD_ENDPOINT` | Llama Guard endpoint URL |
+| `MODEL_ENDPOINT` | Chat/completions provider endpoint used by watcher |
+| `CHAT_COMPLETIONS_MODEL_NAME` | Chat model name used by watcher conversation processing |
 | `MONGODB_DATABASE_DEV` | MongoDB database name for `dev` deployments |
 | `MONGODB_DATABASE_MAIN` | MongoDB database name for `main` deployments |
 
@@ -79,6 +100,7 @@ Optional variables:
 
 - `DOCKER_REGISTRY_PREFIX` (default `mpib/chm/common/base-images`)
 - `K8S_NAMESPACE` (default `elderbot`)
+- `MODEL_API_VERSION` (required only for Azure OpenAI endpoints)
 - `WATCHER_REPLICA_COUNT` (default `1`)
 - watcher tuning variables listed above
 
@@ -92,6 +114,7 @@ Optional variables:
 | `DOCKERCFG` | Base64 Docker config JSON for Kubernetes image pull secret |
 | `MONGODB_URI_DEV` | Watcher MongoDB URI for `dev` deployments |
 | `MONGODB_URI_MAIN` | Watcher MongoDB URI for `main` deployments |
+| `MODEL_API_KEY` | Provider API key used by watcher conversation processing |
 | `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher |
 | `LLAMA_GUARD_API_KEY` | Llama Guard API key used by watcher |
 
@@ -131,3 +154,4 @@ failed build alongside a skipped deployment.
 - Registry auth failures: verify `GITLAB_REGISTRY_USERNAME` and `GITLAB_REGISTRY_PASSWORD`.
 - Kubernetes auth failures: verify `KUBECONFIG` is valid base64 kubeconfig content.
 - Missing watcher env values: verify required variables and secrets are configured in GitHub repository settings.
+- `MODEL_API_KEY` / `MODEL_ENDPOINT` / `CHAT_COMPLETIONS_MODEL_NAME` startup failures: these are required by the monitoring import path even for the watcher deployment. If `MODEL_ENDPOINT` points to Azure OpenAI, also define `MODEL_API_VERSION`.
