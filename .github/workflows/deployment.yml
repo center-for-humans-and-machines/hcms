@@ -133,6 +133,9 @@ jobs:
           MODEL_API_VERSION: ${{ vars.MODEL_API_VERSION }}
           BATCH_MODEL_NAME: ${{ vars.BATCH_MODEL_NAME }}
           CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.CHAT_COMPLETIONS_MODEL_NAME }}
+          LANGFUSE_HOST: ${{ vars.LANGFUSE_HOST }}
+          LANGFUSE_PUBLIC_KEY: ${{ vars.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           MONGODB_URI_DEV: ${{ secrets.MONGODB_URI_DEV }}
           MONGODB_URI_MAIN: ${{ secrets.MONGODB_URI_MAIN }}
           MONGODB_DATABASE_DEV: ${{ vars.MONGODB_DATABASE_DEV }}
@@ -184,6 +187,18 @@ jobs:
             echo "Missing CHAT_COMPLETIONS_MODEL_NAME variable" >&2
             exit 1
           }
+          [[ -n "$LANGFUSE_HOST" ]] || {
+            echo "Missing LANGFUSE_HOST variable" >&2
+            exit 1
+          }
+          [[ -n "$LANGFUSE_PUBLIC_KEY" ]] || {
+            echo "Missing LANGFUSE_PUBLIC_KEY secret" >&2
+            exit 1
+          }
+          [[ -n "$LANGFUSE_SECRET_KEY" ]] || {
+            echo "Missing LANGFUSE_SECRET_KEY secret" >&2
+            exit 1
+          }
           if [[ "$MODEL_ENDPOINT" == *azure* && -z "$MODEL_API_VERSION" ]]; then
             echo "Missing MODEL_API_VERSION variable for Azure endpoint" >&2
             exit 1
@@ -216,6 +231,9 @@ jobs:
             MODEL_API_VERSION: "$MODEL_API_VERSION"
             BATCH_MODEL_NAME: "$BATCH_MODEL_NAME"
             CHAT_COMPLETIONS_MODEL_NAME: "$CHAT_COMPLETIONS_MODEL_NAME"
+            LANGFUSE_HOST: "$LANGFUSE_HOST"
+            LANGFUSE_PUBLIC_KEY: "$LANGFUSE_PUBLIC_KEY"
+            LANGFUSE_SECRET_KEY: "$LANGFUSE_SECRET_KEY"
             MONGODB_URI: "$mongodb_uri"
             MONGODB_DATABASE: "$mongodb_database"
             MONGODB_COLLECTION: "$MONGODB_COLLECTION"
