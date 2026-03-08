@@ -43,34 +43,23 @@ The `watcher` service follows this flow:
 
 ### Runtime deployment variables
 
-The watcher requires two groups of runtime environment variables:
-
-1. Variables currently written by the workflow into `/tmp/deployment_vars.yml`
-1. Additional model configuration variables required by the monitoring import path at startup
-
-The workflow currently writes this contract into `/tmp/deployment_vars.yml`:
+The workflow writes this contract into `/tmp/deployment_vars.yml`:
 
 Required values:
 
 - `MONGODB_URI` (branch-specific: `MONGODB_URI_DEV`/`MONGODB_URI_MAIN`)
 - `MONGODB_DATABASE` (branch-specific: `MONGODB_DATABASE_DEV`/`MONGODB_DATABASE_MAIN`)
+- `MODEL_API_KEY`
+- `MODEL_ENDPOINT`
+- `BATCH_MODEL_NAME`
+- `CHAT_COMPLETIONS_MODEL_NAME`
 - `OPENAI_MODERATION_API_KEY`
 - `LLAMA_GUARD_API_KEY`
 - `LLAMA_GUARD_ENDPOINT`
 
-Additional required watcher runtime values:
-
-- `MODEL_API_KEY`
-- `MODEL_ENDPOINT`
-- `CHAT_COMPLETIONS_MODEL_NAME`
-
 Provider-specific requirement:
 
 - `MODEL_API_VERSION` when `MODEL_ENDPOINT` is an Azure OpenAI endpoint
-
-The current deployment workflow does not populate these model variables in
-`/tmp/deployment_vars.yml`, so the watcher can fail during import/startup with
-errors such as `Set the environment variable MODEL_API_KEY`.
 
 Optional values with defaults:
 
@@ -92,6 +81,7 @@ Optional values with defaults:
 | `APP_NAME` | Application name prefix used in image/release naming |
 | `LLAMA_GUARD_ENDPOINT` | Llama Guard endpoint URL |
 | `MODEL_ENDPOINT` | Chat/completions provider endpoint used by watcher |
+| `BATCH_MODEL_NAME` | Batch model name required by the monitoring configuration import path |
 | `CHAT_COMPLETIONS_MODEL_NAME` | Chat model name used by watcher conversation processing |
 | `MONGODB_DATABASE_DEV` | MongoDB database name for `dev` deployments |
 | `MONGODB_DATABASE_MAIN` | MongoDB database name for `main` deployments |

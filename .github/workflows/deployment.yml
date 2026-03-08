@@ -128,6 +128,11 @@ jobs:
         if: matrix.service == 'watcher'
         shell: bash
         env:
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          MODEL_ENDPOINT: ${{ vars.MODEL_ENDPOINT }}
+          MODEL_API_VERSION: ${{ vars.MODEL_API_VERSION }}
+          BATCH_MODEL_NAME: ${{ vars.BATCH_MODEL_NAME }}
+          CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.CHAT_COMPLETIONS_MODEL_NAME }}
           MONGODB_URI_DEV: ${{ secrets.MONGODB_URI_DEV }}
           MONGODB_URI_MAIN: ${{ secrets.MONGODB_URI_MAIN }}
           MONGODB_DATABASE_DEV: ${{ vars.MONGODB_DATABASE_DEV }}
@@ -163,6 +168,26 @@ jobs:
               ;;
           esac
 
+          [[ -n "$MODEL_API_KEY" ]] || {
+            echo "Missing MODEL_API_KEY secret" >&2
+            exit 1
+          }
+          [[ -n "$MODEL_ENDPOINT" ]] || {
+            echo "Missing MODEL_ENDPOINT variable" >&2
+            exit 1
+          }
+          [[ -n "$BATCH_MODEL_NAME" ]] || {
+            echo "Missing BATCH_MODEL_NAME variable" >&2
+            exit 1
+          }
+          [[ -n "$CHAT_COMPLETIONS_MODEL_NAME" ]] || {
+            echo "Missing CHAT_COMPLETIONS_MODEL_NAME variable" >&2
+            exit 1
+          }
+          if [[ "$MODEL_ENDPOINT" == *azure* && -z "$MODEL_API_VERSION" ]]; then
+            echo "Missing MODEL_API_VERSION variable for Azure endpoint" >&2
+            exit 1
+          }
           [[ -n "$mongodb_uri" ]] || {
             echo "Missing MongoDB URI for branch: ${branch}" >&2
             exit 1
@@ -186,6 +211,11 @@ jobs:
 
           cat > /tmp/deployment_vars.yml <<EOV
           deployment_vars:
+            MODEL_API_KEY: "$MODEL_API_KEY"
+            MODEL_ENDPOINT: "$MODEL_ENDPOINT"
+            MODEL_API_VERSION: "$MODEL_API_VERSION"
+            BATCH_MODEL_NAME: "$BATCH_MODEL_NAME"
+            CHAT_COMPLETIONS_MODEL_NAME: "$CHAT_COMPLETIONS_MODEL_NAME"
             MONGODB_URI: "$mongodb_uri"
             MONGODB_DATABASE: "$mongodb_database"
             MONGODB_COLLECTION: "$MONGODB_COLLECTION"
