@@ -180,6 +180,35 @@ def test_get_backfill_targets_excludes_exhausted_provider_keys():
     assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
 
 
+def test_missing_system_reviewers_returns_empty_for_system_role_message():
+    message = _conversation_doc()["messages"][0]
+    message["role"] = "system"
+
+    missing = MongoConversationRepository.missing_system_reviewers(message)
+
+    assert missing == set()
+
+
+def test_get_backfill_targets_skips_system_role_messages():
+    conversation = _conversation_doc()
+    conversation["messages"][0]["role"] = "system"
+    conversation["messages"][1]["role"] = "user"
+    conversation["messages"][1]["reviewer_flags"] = []
+
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 1
+    assert targets[0].message_index == 1
+    assert targets[0].missing_reviewer_ids == {
+        SYSTEM_OPENAI_REVIEWER_ID,
+        SYSTEM_LLAMA_REVIEWER_ID,
+    }
+
+
 def test_upsert_system_reviewer_flag_is_idempotent_per_message_and_provider():
     collection = FakeCollection([_conversation_doc()])
     repository = MongoConversationRepository.from_collection(collection)
@@ -399,7 +428,9 @@ def test_get_backfill_targets_accepts_blank_optional_reviewer_identity_fields():
         "assigned_to": [],
     }
 
-    repository = MongoConversationRepository.from_collection(FakeCollection([conversation]))
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
 
     targets = repository.get_backfill_targets(batch_size=10)
 
@@ -684,9 +715,7 @@ def test_conversation_document_rejects_unknown_fields(mutator):
     ],
     ids=["blank participant_id", "blank reviewer_id"],
 )
-def test_conversation_document_rejects_blank_required_identity_fields(
-    mutator, match
-):
+def test_conversation_document_rejects_blank_required_identity_fields(mutator, match):
     now = datetime.now(timezone.utc)
     document = {
         "_id": "conversation-required-identities",

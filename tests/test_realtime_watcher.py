@@ -6,11 +6,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
 import os
 import subprocess
 import sys
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Iterable, cast
 
 import pytest
 
@@ -38,9 +39,15 @@ class _Call:
 
 
 @dataclass
-class StubRepository:
+class StubRepository(MongoConversationRepository):
     calls: list[_Call] = field(default_factory=list)
     backfill_batches: list[list[MessageBackfillTarget]] = field(default_factory=list)
+
+    @staticmethod
+    def is_message_eligible_for_system_reviewers(message: dict[str, Any]):
+        return MongoConversationRepository.is_message_eligible_for_system_reviewers(
+            message
+        )
 
     @staticmethod
     def missing_system_reviewers(message: dict[str, Any]):
@@ -54,9 +61,9 @@ class StubRepository:
 
     def get_backfill_targets(
         self,
-        batch_size: int,
+        batch_size: int = 200,
         excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
-    ):
+    ) -> list[MessageBackfillTarget]:
         _ = batch_size
         _ = excluded_provider_keys
         if not self.backfill_batches:
@@ -68,17 +75,17 @@ class StubRepository:
         conversation_id: Any,
         message_index: int,
         reviewer_id: str,
-        categories: list[str],
+        categories: Iterable[str],
         category_other: str,
-        created_at,
-    ):
+        created_at: datetime | None = None,
+    ) -> None:
         _ = created_at
         self.calls.append(
             _Call(
                 conversation_id=conversation_id,
                 message_index=message_index,
                 reviewer_id=reviewer_id,
-                categories=categories,
+                categories=list(categories),
                 category_other=category_other,
             )
         )
@@ -92,9 +99,9 @@ class FilteringStubRepository(StubRepository):
 
     def get_backfill_targets(
         self,
-        batch_size: int,
+        batch_size: int = 200,
         excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
-    ):
+    ) -> list[MessageBackfillTarget]:
         excluded_provider_keys = excluded_provider_keys or set()
         eligible_targets: list[MessageBackfillTarget] = []
 
@@ -130,10 +137,10 @@ class FilteringStubRepository(StubRepository):
         conversation_id: Any,
         message_index: int,
         reviewer_id: str,
-        categories: list[str],
+        categories: Iterable[str],
         category_other: str,
-        created_at,
-    ):
+        created_at: datetime | None = None,
+    ) -> None:
         super().upsert_system_reviewer_flag(
             conversation_id=conversation_id,
             message_index=message_index,
@@ -167,10 +174,15 @@ class FilteringStubRepository(StubRepository):
         self.targets = updated_targets
 
 
-def _message(content: str, reviewer_flags: list[dict[str, Any]]):
+def _message(
+    content: str,
+    reviewer_flags: list[dict[str, Any]],
+    *,
+    role: str = "assistant",
+):
     return {
         "content": content,
-        "role": "assistant",
+        "role": role,
         "timestamp": "2026-03-02T00:00:00Z",
         "type": "assistant",
         "user_flag": {
@@ -295,6 +307,89 @@ def test_handle_change_event_only_processes_messages_missing_system_flags():
                     ],
                 ),
                 _message("needs rating", []),
+            ],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+        },
+    }
+
+    watcher.handle_change_event(event)
+
+    assert len(repository.calls) == 2
+    assert all(call.message_index == 1 for call in repository.calls)
+
+
+@pytest.mark.parametrize(
+    ("operation_type", "update_description"),
+    [
+        ("insert", None),
+        (
+            "update",
+            {
+                "updatedFields": {"messages.0.content": "updated system prompt"},
+                "removedFields": [],
+            },
+        ),
+    ],
+)
+def test_handle_change_event_skips_system_role_messages(
+    operation_type: str, update_description: dict[str, Any] | None
+):
+    repository = StubRepository()
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "hate"],
+        llama_guard_rater=lambda _text: "0",
+    )
+
+    event: dict[str, Any] = {
+        "operationType": operation_type,
+        "fullDocument": {
+            "_id": "conversation-system-only",
+            "participant_id": "p1",
+            "model": "test-model",
+            "experiment_id": "exp-1",
+            "conversation_id": "conversation-system-only",
+            "project_id": "2026_03_08",
+            "created_at": "2026-03-02T00:00:00Z",
+            "messages": [_message("system prompt", [], role="system")],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+        },
+    }
+    if update_description is not None:
+        event["updateDescription"] = update_description
+
+    watcher.handle_change_event(event)
+
+    assert repository.calls == []
+
+
+def test_handle_change_event_processes_only_non_system_messages_in_mixed_conversation():
+    repository = StubRepository()
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "hate"],
+        llama_guard_rater=lambda _text: "0",
+    )
+
+    event = {
+        "operationType": "insert",
+        "fullDocument": {
+            "_id": "conversation-mixed-roles",
+            "participant_id": "p1",
+            "model": "test-model",
+            "experiment_id": "exp-1",
+            "conversation_id": "conversation-mixed-roles",
+            "project_id": "2026_03_08",
+            "created_at": "2026-03-02T00:00:00Z",
+            "messages": [
+                _message("system prompt", [], role="system"),
+                _message("needs rating", [], role="user"),
             ],
             "opened_by": [],
             "reviewed_by": [],
