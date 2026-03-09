@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -20,22 +20,22 @@ repos:
         exclude: ^kubernetes/.+/templates/.+\.ya?ml$
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
 
   - repo: https://github.com/hadolint/hadolint
-    rev: v2.13.1-beta
+    rev: v2.14.0
     hooks:
       - id: hadolint
 
   - repo: https://github.com/gruntwork-io/pre-commit
-    rev: v0.1.29
+    rev: v0.1.30
     hooks:
       - id: helmlint
 
   - repo: https://github.com/pycqa/flake8
-    rev: "7.2.0" # pick a git hash / tag to point to
+    rev: "7.3.0" # pick a git hash / tag to point to
     hooks:
       - id: flake8
 
@@ -61,19 +61,19 @@ repos:
         args: ["--rcfile=.pylintrc"]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: "v1.15.0"
+    rev: "v1.19.1"
     hooks:
       - id: mypy
         args: ["--config-file", ".mypy.ini"]
 
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.44.0
+    rev: v0.48.0
     hooks:
       - id: markdownlint
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.11.7
+    rev: v0.15.5
     hooks:
       # Run the linter.
       - id: ruff
@@ -84,7 +84,7 @@ repos:
         types_or: [python, pyi, jupyter]
 
   - repo: https://github.com/google/pyink
-    rev: 24.10.1
+    rev: 25.12.0
     hooks:
       - id: pyink
         # It is recommended to specify the latest version of Python
