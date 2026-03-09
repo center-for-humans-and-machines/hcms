@@ -62,7 +62,12 @@ class MessageDocument(BaseModel):
     role: str = Field(..., min_length=1)
     timestamp: datetime
     type: str = Field(..., min_length=1)
-    user_flag: UserFlagDocument = Field(default_factory=UserFlagDocument)
+    flagged: bool | None = None
+    flagged_at: datetime | None = None
+    flagged_by: str | None = Field(default=None, min_length=1)
+    flag_category: str | None = None
+    flag_other_reason: str | None = None
+    user_flag: UserFlagDocument | None = None
     reviewer_flags: List[ReviewerFlagDocument] = Field(default_factory=list)
     duplicate_flags: List[DuplicateFlagDocument] = Field(default_factory=list)
 
@@ -128,6 +133,8 @@ class ConversationDocument(BaseModel):
     conversation_id: str = Field(..., min_length=1)
     project_id: str = Field(..., min_length=1)
     created_at: datetime
+    custom_system_message_id: str | None = None
+    multi_rounds: bool = True
     messages: List[MessageDocument] = Field(...)
     opened_by: List[OpenedByDocument] = Field(default_factory=list)
     reviewed_by: List[ReviewedByDocument] = Field(default_factory=list)
