@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
+from hpms.database.models import ConversationDocument
 from hpms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
@@ -93,6 +97,8 @@ def _conversation_doc() -> dict[str, Any]:
         "participant_id": "p1",
         "model": "test-model",
         "experiment_id": "exp-1",
+        "conversation_id": "conversation-1",
+        "project_id": "2026_03_08",
         "created_at": now,
         "messages": [
             {
@@ -245,6 +251,8 @@ def test_get_backfill_targets_defaults_missing_user_flag():
         "participant_id": "p2",
         "model": "test-model",
         "experiment_id": "exp-2",
+        "conversation_id": "conversation-missing-user-flag",
+        "project_id": "2026_03_08",
         "created_at": now,
         "messages": [
             {
@@ -282,6 +290,8 @@ def test_get_backfill_targets_defaults_missing_optional_lists():
         "participant_id": "p3",
         "model": "test-model",
         "experiment_id": "exp-3",
+        "conversation_id": "conversation-missing-lists",
+        "project_id": "2026_03_08",
         "created_at": now,
         "messages": [
             {
@@ -306,3 +316,202 @@ def test_get_backfill_targets_defaults_missing_optional_lists():
         SYSTEM_OPENAI_REVIEWER_ID,
         SYSTEM_LLAMA_REVIEWER_ID,
     }
+
+
+def test_get_backfill_targets_accepts_simple_chat_fields():
+    now = datetime.now(timezone.utc)
+    legacy_conversation = {
+        "_id": "conversation-legacy-fields",
+        "participant_id": "p4",
+        "model": "test-model",
+        "experiment_id": "exp-4",
+        "created_at": now,
+        "conversation_id": "conversation-legacy-fields",
+        "project_id": "2026_03_08",
+        "messages": [
+            {
+                "content": "message with legacy flag metadata",
+                "role": "assistant",
+                "timestamp": now,
+                "type": "assistant",
+                "user_flag": {
+                    "category": "",
+                    "category_other": "",
+                    "reviews": [],
+                    "created_at": "2026-03-08 22:21:48.467943",
+                    "created_by": "test",
+                },
+                "reviewer_flags": [],
+            }
+        ],
+        "opened_by": [],
+        "reviewed_by": [],
+        "assigned_to": [],
+    }
+
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([legacy_conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 1
+    assert targets[0].conversation_id == "conversation-legacy-fields"
+    assert targets[0].message_index == 0
+    assert targets[0].missing_reviewer_ids == {
+        SYSTEM_OPENAI_REVIEWER_ID,
+        SYSTEM_LLAMA_REVIEWER_ID,
+    }
+
+
+def test_conversation_document_accepts_canonical_extended_fields():
+    now = datetime.now(timezone.utc)
+    document = ConversationDocument.model_validate(
+        {
+            "_id": "conversation-canonical",
+            "participant_id": "p5",
+            "model": "test-model",
+            "experiment_id": "exp-5",
+            "conversation_id": "conversation-canonical",
+            "project_id": "2026_03_08",
+            "created_at": now,
+            "messages": [
+                {
+                    "content": "message with all fields",
+                    "role": "assistant",
+                    "timestamp": now,
+                    "type": "assistant",
+                    "user_flag": {
+                        "category": "harassment",
+                        "category_other": "",
+                        "created_at": now,
+                        "created_by": "participant",
+                        "reviews": [
+                            {
+                                "reviewer_id": "reviewer-1",
+                                "reviewer_username": "alice",
+                                "approved": True,
+                                "comment": "Looks valid",
+                                "reviewed_at": now,
+                            }
+                        ],
+                    },
+                    "reviewer_flags": [
+                        {
+                            "reviewer_id": "reviewer-2",
+                            "reviewer_by_username": "bob",
+                            "created_at": now,
+                            "categories": ["hate"],
+                            "category_other": "",
+                            "comment": "Escalate",
+                        }
+                    ],
+                    "duplicate_flags": [
+                        {
+                            "reviewer_id": "reviewer-3",
+                            "reviewer_username": "carol",
+                            "flagged_at": now,
+                        }
+                    ],
+                }
+            ],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+            "naturalness_ratings": [
+                {
+                    "reviewer_id": "reviewer-4",
+                    "coherence": 5,
+                    "topic_progression": 4,
+                    "rated_at": now,
+                }
+            ],
+            "realism_ratings": [
+                {
+                    "reviewer_id": "reviewer-5",
+                    "rating": 10,
+                    "rated_at": now,
+                }
+            ],
+        }
+    )
+
+    assert document.messages[0].user_flag.reviews[0].reviewer_username == "alice"
+    assert document.messages[0].reviewer_flags[0].reviewer_by_username == "bob"
+    assert document.messages[0].reviewer_flags[0].comment == "Escalate"
+    assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
+    assert document.naturalness_ratings[0].coherence == 5
+    assert document.realism_ratings[0].rating == 10
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda document: document.update({"unexpected_top_level": "nope"}),
+        lambda document: document["messages"][0]["user_flag"].update(
+            {"unexpected_user_flag": "nope"}
+        ),
+        lambda document: document["messages"][0]["reviewer_flags"][0].update(
+            {"unexpected_reviewer_flag": "nope"}
+        ),
+        lambda document: document["naturalness_ratings"][0].update(
+            {"unexpected_rating_field": "nope"}
+        ),
+    ],
+    ids=[
+        "unknown top-level field",
+        "unknown user_flag field",
+        "unknown reviewer_flags field",
+        "unknown naturalness_ratings field",
+    ],
+)
+def test_conversation_document_rejects_unknown_fields(mutator):
+    now = datetime.now(timezone.utc)
+    document = {
+        "_id": "conversation-strict",
+        "participant_id": "p6",
+        "model": "test-model",
+        "experiment_id": "exp-6",
+        "conversation_id": "conversation-strict",
+        "project_id": "2026_03_08",
+        "created_at": now,
+        "messages": [
+            {
+                "content": "message",
+                "role": "assistant",
+                "timestamp": now,
+                "type": "assistant",
+                "user_flag": {
+                    "category": "",
+                    "category_other": "",
+                    "reviews": [],
+                },
+                "reviewer_flags": [
+                    {
+                        "reviewer_id": "reviewer-1",
+                        "created_at": now,
+                        "categories": [],
+                        "category_other": "",
+                        "comment": "",
+                    }
+                ],
+            }
+        ],
+        "opened_by": [],
+        "reviewed_by": [],
+        "assigned_to": [],
+        "naturalness_ratings": [
+            {
+                "reviewer_id": "reviewer-2",
+                "coherence": 3,
+                "topic_progression": 4,
+                "rated_at": now,
+            }
+        ],
+        "realism_ratings": [],
+    }
+
+    mutator(document)
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ConversationDocument.model_validate(document)

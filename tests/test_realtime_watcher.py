@@ -273,6 +273,8 @@ def test_handle_change_event_only_processes_messages_missing_system_flags():
             "participant_id": "p1",
             "model": "test-model",
             "experiment_id": "exp-1",
+            "conversation_id": "conversation-2",
+            "project_id": "2026_03_08",
             "created_at": "2026-03-02T00:00:00Z",
             "messages": [
                 _message(
@@ -322,6 +324,8 @@ def test_handle_change_event_defaults_missing_user_flag_and_processes_message():
             "participant_id": "p1",
             "model": "test-model",
             "experiment_id": "exp-1",
+            "conversation_id": "conversation-2b",
+            "project_id": "2026_03_08",
             "created_at": "2026-03-02T00:00:00Z",
             "messages": [
                 {
@@ -360,6 +364,8 @@ def test_handle_change_event_defaults_missing_optional_message_and_conversation_
             "participant_id": "p1",
             "model": "test-model",
             "experiment_id": "exp-1",
+            "conversation_id": "conversation-2c",
+            "project_id": "2026_03_08",
             "created_at": "2026-03-02T00:00:00Z",
             "messages": [
                 {
@@ -375,6 +381,56 @@ def test_handle_change_event_defaults_missing_optional_message_and_conversation_
     watcher.handle_change_event(event)
 
     assert len(repository.calls) == 2
+    assert all(call.message_index == 0 for call in repository.calls)
+
+
+def test_handle_change_event_accepts_simple_chat_fields():
+    repository = StubRepository()
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "hate"],
+        llama_guard_rater=lambda _text: "0",
+    )
+
+    event = {
+        "operationType": "insert",
+        "fullDocument": {
+            "_id": "conversation-legacy",
+            "participant_id": "p1",
+            "model": "test-model",
+            "experiment_id": "exp-1",
+            "conversation_id": "conversation-legacy",
+            "project_id": "2026_03_08",
+            "created_at": "2026-03-02T00:00:00Z",
+            "messages": [
+                {
+                    "content": "needs rating",
+                    "role": "assistant",
+                    "timestamp": "2026-03-02T00:00:00Z",
+                    "type": "assistant",
+                    "user_flag": {
+                        "category": "",
+                        "category_other": "",
+                        "reviews": [],
+                        "created_at": "2026-03-08 22:21:48.467943",
+                        "created_by": "test",
+                    },
+                    "reviewer_flags": [],
+                }
+            ],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+        },
+    }
+
+    watcher.handle_change_event(event)
+
+    assert len(repository.calls) == 2
+    assert all(
+        call.conversation_id == "conversation-legacy" for call in repository.calls
+    )
     assert all(call.message_index == 0 for call in repository.calls)
 
 

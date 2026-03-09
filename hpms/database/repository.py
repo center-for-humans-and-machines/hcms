@@ -111,6 +111,8 @@ class MongoConversationRepository:
                 "participant_id": 1,
                 "model": 1,
                 "experiment_id": 1,
+                "conversation_id": 1,
+                "project_id": 1,
                 "created_at": 1,
                 "messages": 1,
                 "opened_by": 1,

@@ -46,6 +46,8 @@ def _conversation_doc(
         "participant_id": "p1",
         "model": "test-model",
         "experiment_id": "exp-1",
+        "conversation_id": conversation_id,
+        "project_id": "2026_03_08",
         "created_at": now,
         "messages": [
             {

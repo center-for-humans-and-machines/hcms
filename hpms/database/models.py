@@ -1,7 +1,7 @@
 """MongoDB document schemas for HPMS conversation data."""
 
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +12,7 @@ class UserFlagReviewDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reviewer_id: str = Field(..., min_length=1)
+    reviewer_username: str | None = Field(default=None, min_length=1)
     approved: bool
     comment: str = ""
     reviewed_at: datetime
@@ -24,6 +25,8 @@ class UserFlagDocument(BaseModel):
 
     category: str = ""
     category_other: str = ""
+    created_at: datetime | None = None
+    created_by: str | None = Field(default=None, min_length=1)
     reviews: List[UserFlagReviewDocument] = Field(default_factory=list)
 
 
@@ -33,9 +36,21 @@ class ReviewerFlagDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reviewer_id: str = Field(..., min_length=1)
+    reviewer_by_username: str | None = Field(default=None, min_length=1)
     created_at: datetime
     categories: List[str] = Field(default_factory=list)
     category_other: str = ""
+    comment: str = ""
+
+
+class DuplicateFlagDocument(BaseModel):
+    """Duplicate flag metadata for a single message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    reviewer_username: str | None = Field(default=None, min_length=1)
+    flagged_at: datetime
 
 
 class MessageDocument(BaseModel):
@@ -49,6 +64,7 @@ class MessageDocument(BaseModel):
     type: str = Field(..., min_length=1)
     user_flag: UserFlagDocument = Field(default_factory=UserFlagDocument)
     reviewer_flags: List[ReviewerFlagDocument] = Field(default_factory=list)
+    duplicate_flags: List[DuplicateFlagDocument] = Field(default_factory=list)
 
 
 class OpenedByDocument(BaseModel):
@@ -79,6 +95,27 @@ class ConversationAssignmentDocument(BaseModel):
     assigned_at: datetime
 
 
+class NaturalnessRatingDocument(BaseModel):
+    """Naturalness rating metadata for a conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    coherence: int = Field(..., ge=1, le=5)
+    topic_progression: int = Field(..., ge=1, le=5)
+    rated_at: datetime
+
+
+class RealismRatingDocument(BaseModel):
+    """Realism rating metadata for a conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    rating: Literal[0, 5, 10]
+    rated_at: datetime
+
+
 class ConversationDocument(BaseModel):
     """MongoDB conversation document matching the dashboard schema."""
 
@@ -88,8 +125,12 @@ class ConversationDocument(BaseModel):
     participant_id: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
     experiment_id: str = Field(..., min_length=1)
+    conversation_id: str = Field(..., min_length=1)
+    project_id: str = Field(..., min_length=1)
     created_at: datetime
     messages: List[MessageDocument] = Field(...)
     opened_by: List[OpenedByDocument] = Field(default_factory=list)
     reviewed_by: List[ReviewedByDocument] = Field(default_factory=list)
     assigned_to: List[ConversationAssignmentDocument] = Field(default_factory=list)
+    naturalness_ratings: List[NaturalnessRatingDocument] = Field(default_factory=list)
+    realism_ratings: List[RealismRatingDocument] = Field(default_factory=list)
