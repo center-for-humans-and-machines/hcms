@@ -348,6 +348,52 @@ def test_handle_change_event_defaults_missing_user_flag_and_processes_message():
     assert all(call.message_index == 0 for call in repository.calls)
 
 
+def test_handle_change_event_accepts_blank_optional_reviewer_identity_fields():
+    repository = StubRepository()
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "hate"],
+        llama_guard_rater=lambda _text: "0",
+    )
+
+    event = {
+        "operationType": "insert",
+        "fullDocument": {
+            "_id": "conversation-blank-reviewer-username",
+            "participant_id": "p1",
+            "model": "test-model",
+            "experiment_id": "exp-1",
+            "conversation_id": "conversation-blank-reviewer-username",
+            "project_id": "2026_03_08",
+            "created_at": "2026-03-02T00:00:00Z",
+            "messages": [
+                _message(
+                    "needs one remaining rating",
+                    [
+                        {
+                            "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+                            "reviewer_by_username": "",
+                            "created_at": "2026-03-02T00:00:00Z",
+                            "categories": [],
+                            "category_other": "",
+                        }
+                    ],
+                )
+            ],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+        },
+    }
+
+    watcher.handle_change_event(event)
+
+    assert len(repository.calls) == 1
+    assert repository.calls[0].message_index == 0
+    assert repository.calls[0].reviewer_id == SYSTEM_LLAMA_REVIEWER_ID
+
+
 def test_handle_change_event_defaults_missing_optional_message_and_conversation_lists():
     repository = StubRepository()
 

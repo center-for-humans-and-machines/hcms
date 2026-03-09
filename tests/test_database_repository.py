@@ -366,6 +366,49 @@ def test_get_backfill_targets_accepts_simple_chat_fields():
     }
 
 
+def test_get_backfill_targets_accepts_blank_optional_reviewer_identity_fields():
+    now = datetime.now(timezone.utc)
+    conversation = {
+        "_id": "conversation-blank-reviewer-username",
+        "participant_id": "p5",
+        "model": "test-model",
+        "experiment_id": "exp-5",
+        "conversation_id": "conversation-blank-reviewer-username",
+        "project_id": "2026_03_09",
+        "created_at": now,
+        "messages": [
+            {
+                "content": "message with legacy reviewer username",
+                "role": "assistant",
+                "timestamp": now,
+                "type": "assistant",
+                "reviewer_flags": [
+                    {
+                        "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+                        "reviewer_by_username": "",
+                        "created_at": now,
+                        "categories": ["violence"],
+                        "category_other": "",
+                        "comment": "",
+                    }
+                ],
+            }
+        ],
+        "opened_by": [],
+        "reviewed_by": [],
+        "assigned_to": [],
+    }
+
+    repository = MongoConversationRepository.from_collection(FakeCollection([conversation]))
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 1
+    assert targets[0].conversation_id == "conversation-blank-reviewer-username"
+    assert targets[0].message_index == 0
+    assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
+
+
 def test_conversation_document_accepts_canonical_extended_fields():
     now = datetime.now(timezone.utc)
     document = ConversationDocument.model_validate(
@@ -444,6 +487,70 @@ def test_conversation_document_accepts_canonical_extended_fields():
     assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
     assert document.naturalness_ratings[0].coherence == 5
     assert document.realism_ratings[0].rating == 10
+
+
+def test_conversation_document_normalizes_blank_optional_identity_fields():
+    now = datetime.now(timezone.utc)
+    document = ConversationDocument.model_validate(
+        {
+            "_id": "conversation-blank-optional-fields",
+            "participant_id": "p7",
+            "model": "test-model",
+            "experiment_id": "exp-7",
+            "conversation_id": "conversation-blank-optional-fields",
+            "project_id": "2026_03_09",
+            "created_at": now,
+            "messages": [
+                {
+                    "content": "message with blank optional identity fields",
+                    "role": "assistant",
+                    "timestamp": now,
+                    "type": "assistant",
+                    "flagged_by": "   ",
+                    "user_flag": {
+                        "category": "harassment",
+                        "category_other": "",
+                        "created_by": "",
+                        "reviews": [
+                            {
+                                "reviewer_id": "reviewer-1",
+                                "reviewer_username": " ",
+                                "approved": True,
+                                "comment": "",
+                                "reviewed_at": now,
+                            }
+                        ],
+                    },
+                    "reviewer_flags": [
+                        {
+                            "reviewer_id": "reviewer-2",
+                            "reviewer_by_username": "",
+                            "created_at": now,
+                            "categories": [],
+                            "category_other": "",
+                            "comment": "",
+                        }
+                    ],
+                    "duplicate_flags": [
+                        {
+                            "reviewer_id": "reviewer-3",
+                            "reviewer_username": "   ",
+                            "flagged_at": now,
+                        }
+                    ],
+                }
+            ],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+        }
+    )
+
+    assert document.messages[0].flagged_by is None
+    assert document.messages[0].user_flag.created_by is None
+    assert document.messages[0].user_flag.reviews[0].reviewer_username is None
+    assert document.messages[0].reviewer_flags[0].reviewer_by_username is None
+    assert document.messages[0].duplicate_flags[0].reviewer_username is None
 
 
 def test_conversation_document_accepts_simple_chat_compatible_shape():
@@ -558,4 +665,60 @@ def test_conversation_document_rejects_unknown_fields(mutator):
     mutator(document)
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("mutator", "match"),
+    [
+        (
+            lambda document: document.update({"participant_id": ""}),
+            "participant_id",
+        ),
+        (
+            lambda document: document["messages"][0]["reviewer_flags"][0].update(
+                {"reviewer_id": " "}
+            ),
+            "reviewer_id",
+        ),
+    ],
+    ids=["blank participant_id", "blank reviewer_id"],
+)
+def test_conversation_document_rejects_blank_required_identity_fields(
+    mutator, match
+):
+    now = datetime.now(timezone.utc)
+    document = {
+        "_id": "conversation-required-identities",
+        "participant_id": "p8",
+        "model": "test-model",
+        "experiment_id": "exp-8",
+        "conversation_id": "conversation-required-identities",
+        "project_id": "2026_03_09",
+        "created_at": now,
+        "messages": [
+            {
+                "content": "message",
+                "role": "assistant",
+                "timestamp": now,
+                "type": "assistant",
+                "reviewer_flags": [
+                    {
+                        "reviewer_id": "reviewer-1",
+                        "created_at": now,
+                        "categories": [],
+                        "category_other": "",
+                        "comment": "",
+                    }
+                ],
+            }
+        ],
+        "opened_by": [],
+        "reviewed_by": [],
+        "assigned_to": [],
+    }
+
+    mutator(document)
+
+    with pytest.raises(ValidationError, match=match):
         ConversationDocument.model_validate(document)

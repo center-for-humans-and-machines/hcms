@@ -3,10 +3,54 @@
 from datetime import datetime
 from typing import Any, List, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class UserFlagReviewDocument(BaseModel):
+# pylint: disable=too-few-public-methods
+class _BlankOptionalIdentityFieldMixin:
+    """Normalize blank optional identity fields to ``None``."""
+
+    @field_validator(
+        "reviewer_username",
+        "created_by",
+        "reviewer_by_username",
+        "flagged_by",
+        mode="before",
+        check_fields=False,
+    )
+    @classmethod
+    def blank_optional_identity_field_to_none(cls, value: Any) -> Any:
+        """Treat blank legacy identity strings as missing values."""
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class _NonBlankRequiredIdentityFieldMixin:
+    """Reject whitespace-only values for required identity fields."""
+
+    @field_validator(
+        "reviewer_id",
+        "participant_id",
+        "experiment_id",
+        "conversation_id",
+        "project_id",
+        mode="before",
+        check_fields=False,
+    )
+    @classmethod
+    def reject_blank_required_identity_field(cls, value: Any) -> Any:
+        """Ensure required identity fields contain a non-whitespace value."""
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("Value must contain at least 1 non-whitespace character")
+        return value
+
+
+class UserFlagReviewDocument(
+    _BlankOptionalIdentityFieldMixin, _NonBlankRequiredIdentityFieldMixin, BaseModel
+):
     """Review of a participant flag by a human reviewer."""
 
     model_config = ConfigDict(extra="forbid")
@@ -18,7 +62,7 @@ class UserFlagReviewDocument(BaseModel):
     reviewed_at: datetime
 
 
-class UserFlagDocument(BaseModel):
+class UserFlagDocument(_BlankOptionalIdentityFieldMixin, BaseModel):
     """Participant-created flag on a single message."""
 
     model_config = ConfigDict(extra="forbid")
@@ -30,7 +74,9 @@ class UserFlagDocument(BaseModel):
     reviews: List[UserFlagReviewDocument] = Field(default_factory=list)
 
 
-class ReviewerFlagDocument(BaseModel):
+class ReviewerFlagDocument(
+    _BlankOptionalIdentityFieldMixin, _NonBlankRequiredIdentityFieldMixin, BaseModel
+):
     """Reviewer-created flag on a single message."""
 
     model_config = ConfigDict(extra="forbid")
@@ -43,7 +89,9 @@ class ReviewerFlagDocument(BaseModel):
     comment: str = ""
 
 
-class DuplicateFlagDocument(BaseModel):
+class DuplicateFlagDocument(
+    _BlankOptionalIdentityFieldMixin, _NonBlankRequiredIdentityFieldMixin, BaseModel
+):
     """Duplicate flag metadata for a single message."""
 
     model_config = ConfigDict(extra="forbid")
@@ -53,7 +101,7 @@ class DuplicateFlagDocument(BaseModel):
     flagged_at: datetime
 
 
-class MessageDocument(BaseModel):
+class MessageDocument(_BlankOptionalIdentityFieldMixin, BaseModel):
     """Message document embedded in a conversation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -72,7 +120,7 @@ class MessageDocument(BaseModel):
     duplicate_flags: List[DuplicateFlagDocument] = Field(default_factory=list)
 
 
-class OpenedByDocument(BaseModel):
+class OpenedByDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """Reviewer open-state entry."""
 
     model_config = ConfigDict(extra="forbid")
@@ -81,7 +129,7 @@ class OpenedByDocument(BaseModel):
     opened_at: datetime
 
 
-class ReviewedByDocument(BaseModel):
+class ReviewedByDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """Reviewer reviewed-state entry."""
 
     model_config = ConfigDict(extra="forbid")
@@ -90,7 +138,7 @@ class ReviewedByDocument(BaseModel):
     reviewed_at: datetime
 
 
-class ConversationAssignmentDocument(BaseModel):
+class ConversationAssignmentDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """Assignment metadata for a reviewer and conversation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -100,7 +148,7 @@ class ConversationAssignmentDocument(BaseModel):
     assigned_at: datetime
 
 
-class NaturalnessRatingDocument(BaseModel):
+class NaturalnessRatingDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """Naturalness rating metadata for a conversation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -111,7 +159,7 @@ class NaturalnessRatingDocument(BaseModel):
     rated_at: datetime
 
 
-class RealismRatingDocument(BaseModel):
+class RealismRatingDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """Realism rating metadata for a conversation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -121,7 +169,7 @@ class RealismRatingDocument(BaseModel):
     rated_at: datetime
 
 
-class ConversationDocument(BaseModel):
+class ConversationDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """MongoDB conversation document matching the dashboard schema."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
