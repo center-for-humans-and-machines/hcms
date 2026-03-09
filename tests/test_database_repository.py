@@ -328,20 +328,22 @@ def test_get_backfill_targets_accepts_simple_chat_fields():
         "created_at": now,
         "conversation_id": "conversation-legacy-fields",
         "project_id": "2026_03_08",
+        "custom_system_message_id": None,
+        "multi_rounds": True,
         "messages": [
             {
                 "content": "message with legacy flag metadata",
                 "role": "assistant",
                 "timestamp": now,
                 "type": "assistant",
-                "user_flag": {
-                    "category": "",
-                    "category_other": "",
-                    "reviews": [],
-                    "created_at": "2026-03-08 22:21:48.467943",
-                    "created_by": "test",
-                },
+                "flagged": None,
+                "flagged_at": None,
+                "flagged_by": None,
+                "flag_category": None,
+                "flag_other_reason": None,
+                "user_flag": None,
                 "reviewer_flags": [],
+                "duplicate_flags": [],
             }
         ],
         "opened_by": [],
@@ -442,6 +444,48 @@ def test_conversation_document_accepts_canonical_extended_fields():
     assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
     assert document.naturalness_ratings[0].coherence == 5
     assert document.realism_ratings[0].rating == 10
+
+
+def test_conversation_document_accepts_simple_chat_compatible_shape():
+    now = datetime.now(timezone.utc)
+    document = ConversationDocument.model_validate(
+        {
+            "_id": "conversation-simple-chat",
+            "participant_id": "p6",
+            "model": "gpt-4o",
+            "experiment_id": "exp-6",
+            "conversation_id": "conversation-simple-chat",
+            "project_id": "2026_03_09",
+            "created_at": now,
+            "custom_system_message_id": None,
+            "multi_rounds": True,
+            "messages": [
+                {
+                    "content": "You're alright",
+                    "role": "system",
+                    "timestamp": now,
+                    "type": "text",
+                    "flagged": None,
+                    "flagged_at": None,
+                    "flagged_by": None,
+                    "flag_category": None,
+                    "flag_other_reason": None,
+                    "user_flag": None,
+                    "reviewer_flags": [],
+                    "duplicate_flags": [],
+                }
+            ],
+            "opened_by": [],
+            "reviewed_by": [],
+            "assigned_to": [],
+        }
+    )
+
+    assert document.custom_system_message_id is None
+    assert document.multi_rounds is True
+    assert document.messages[0].flagged is None
+    assert document.messages[0].user_flag is None
+    assert document.messages[0].duplicate_flags == []
 
 
 @pytest.mark.parametrize(
