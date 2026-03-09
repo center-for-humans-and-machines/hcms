@@ -9,6 +9,7 @@ from typing import Any, Iterable, Optional, Set
 
 from pydantic import ValidationError
 
+from hpms.constants import SYSTEM
 from hpms.database.models import ConversationDocument, MessageDocument
 
 SYSTEM_OPENAI_REVIEWER_ID = "system_openai_moderation"
@@ -81,6 +82,11 @@ class MongoConversationRepository:
     @staticmethod
     def missing_system_reviewers(message: dict[str, Any]) -> Set[str]:
         """Return system reviewer IDs that have not yet been persisted."""
+        if not MongoConversationRepository.is_message_eligible_for_system_reviewers(
+            message
+        ):
+            return set()
+
         reviewer_flags = message.get("reviewer_flags", [])
         existing_reviewer_ids = {
             str(flag.get("reviewer_id", ""))
@@ -94,6 +100,19 @@ class MongoConversationRepository:
         if SYSTEM_LLAMA_REVIEWER_ID not in existing_reviewer_ids:
             missing.add(SYSTEM_LLAMA_REVIEWER_ID)
         return missing
+
+    @staticmethod
+    def is_message_eligible_for_system_reviewers(message: dict[str, Any]) -> bool:
+        """Return whether a message should be sent to automated reviewers."""
+        content = message.get("content", "")
+        if not isinstance(content, str) or not content.strip():
+            return False
+
+        role = message.get("role", "")
+        if not isinstance(role, str):
+            return False
+
+        return role.strip() != SYSTEM
 
     def get_backfill_targets(
         self,
@@ -136,9 +155,9 @@ class MongoConversationRepository:
             for message_index, message in enumerate(messages):
                 if not isinstance(message, dict):
                     continue
-                content = message.get("content", "")
-                if not isinstance(content, str) or not content.strip():
+                if not self.is_message_eligible_for_system_reviewers(message):
                     continue
+                content = message["content"]
 
                 missing = self.missing_system_reviewers(message)
                 missing = {
@@ -280,10 +299,10 @@ class MongoConversationRepository:
                                                                     "$let": {
                                                                         "vars": {
                                                                             "existing_flags": {
-                                                                                    "$ifNull": [
-                                                                                        "$$message.reviewer_flags",
-                                                                                        [],
-                                                                                    ]
+                                                                                "$ifNull": [
+                                                                                    "$$message.reviewer_flags",
+                                                                                    [],
+                                                                                ]
                                                                             }
                                                                         },
                                                                         "in": {
@@ -327,7 +346,9 @@ class MongoConversationRepository:
                                                                                 {
                                                                                     "$concatArrays": [
                                                                                         "$$existing_flags",
-                                                                                        ["$$new_flag"],
+                                                                                        [
+                                                                                            "$$new_flag"
+                                                                                        ],
                                                                                     ]
                                                                                 },
                                                                             ]
@@ -349,4 +370,5 @@ class MongoConversationRepository:
                 }
             }
         ]
+
     # pylint: enable=line-too-long

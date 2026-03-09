@@ -310,14 +310,11 @@ class RealtimeConversationWatcher:
                 continue
 
             message = messages[message_index]
-            content = (
-                message.get("content", "").strip()
-                if isinstance(message, dict)
-                and isinstance(message.get("content", ""), str)
-                else ""
-            )
-            if not content:
+            if not isinstance(message, dict):
                 continue
+            if not self.repository.is_message_eligible_for_system_reviewers(message):
+                continue
+            content = message["content"]
 
             missing_reviewer_ids = self.repository.missing_system_reviewers(message)
             if not missing_reviewer_ids:
