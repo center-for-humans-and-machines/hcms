@@ -1,11 +1,11 @@
 """Database package exports."""
 
 from hpms.database.models import (
-    ConversationAssignmentDocument,
+    AssignedMessageDocument,
     ConversationDocument,
     MessageDocument,
     OpenedByDocument,
-    ReviewedByDocument,
+    ReviewedMessageDocument,
     ReviewerFlagDocument,
     UserFlagDocument,
     UserFlagReviewDocument,
@@ -24,8 +24,8 @@ __all__ = [
     "UserFlagDocument",
     "ReviewerFlagDocument",
     "OpenedByDocument",
-    "ReviewedByDocument",
-    "ConversationAssignmentDocument",
+    "ReviewedMessageDocument",
+    "AssignedMessageDocument",
     "MessageBackfillTarget",
     "MongoConversationRepository",
     "SYSTEM_OPENAI_REVIEWER_ID",

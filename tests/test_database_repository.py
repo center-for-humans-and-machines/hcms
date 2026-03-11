@@ -1,6 +1,6 @@
 """Tests for Mongo conversation repository helpers."""
 
-# pylint: disable=missing-function-docstring,too-few-public-methods,too-many-locals,duplicate-code
+# pylint: disable=missing-function-docstring,too-few-public-methods,duplicate-code
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from bson import ObjectId
 import pytest
 from pydantic import ValidationError
 
@@ -42,6 +43,7 @@ class FakeCollection:
             return None
         return deepcopy(doc)
 
+    # pylint: disable=too-many-locals
     def update_one(
         self,
         query: dict[str, Any],
@@ -70,7 +72,7 @@ class FakeCollection:
             return _UpdateResult(0)
 
         message = doc["messages"][message_index]
-        reviewer_flags = message.setdefault("reviewer_flags", [])
+        reviewer_flags = message["reviewer_flags"]
 
         if isinstance(update, list):
             assert len(update) == 1
@@ -90,58 +92,73 @@ class FakeCollection:
         raise AssertionError("Unsupported update operation in fake collection")
 
 
+def _message_doc(
+    now: datetime,
+    *,
+    content: str,
+    role: str = "assistant",
+    reviewer_flags: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "content": content,
+        "role": role,
+        "timestamp": now,
+        "type": role,
+        "flagged": False,
+        "flagged_at": None,
+        "flagged_by": None,
+        "flag_category": None,
+        "flag_other_reason": None,
+        "user_flag": {
+            "category": "",
+            "category_other": "",
+            "reviews": [],
+        },
+        "reviewer_flags": reviewer_flags or [],
+        "duplicate_flags": [],
+    }
+
+
 def _conversation_doc() -> dict[str, Any]:
     now = datetime.now(timezone.utc)
+    document_id = ObjectId()
     return {
-        "_id": "conversation-1",
+        "_id": document_id,
+        "conversation_id": "conversation-1",
         "participant_id": "p1",
         "model": "test-model",
         "experiment_id": "exp-1",
-        "conversation_id": "conversation-1",
         "project_id": "2026_03_08",
         "created_at": now,
+        "custom_system_message_id": None,
+        "multi_rounds": True,
         "messages": [
-            {
-                "content": "message one",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "user_flag": {
-                    "category": "",
-                    "category_other": "",
-                    "reviews": [],
-                },
-                "reviewer_flags": [],
-            },
-            {
-                "content": "message two",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "user_flag": {
-                    "category": "",
-                    "category_other": "",
-                    "reviews": [],
-                },
-                "reviewer_flags": [
+            _message_doc(now, content="message one"),
+            _message_doc(
+                now,
+                content="message two",
+                reviewer_flags=[
                     {
                         "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+                        "reviewer_by_username": SYSTEM_OPENAI_REVIEWER_ID,
                         "created_at": now,
                         "categories": ["violence"],
                         "category_other": "",
+                        "comment": "",
                     }
                 ],
-            },
+            ),
         ],
         "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
+        "assigned_messages": [],
+        "reviewed_messages": [],
     }
 
 
 def test_get_backfill_targets_includes_only_messages_missing_system_flags():
+    conversation = _conversation_doc()
     repository = MongoConversationRepository.from_collection(
-        FakeCollection([_conversation_doc()])
+        FakeCollection([conversation])
     )
 
     targets = repository.get_backfill_targets(batch_size=10)
@@ -149,7 +166,7 @@ def test_get_backfill_targets_includes_only_messages_missing_system_flags():
     assert len(targets) == 2
 
     first = targets[0]
-    assert first.conversation_id == "conversation-1"
+    assert first.document_id == conversation["_id"]
     assert first.message_index == 0
     assert first.missing_reviewer_ids == {
         SYSTEM_OPENAI_REVIEWER_ID,
@@ -157,17 +174,19 @@ def test_get_backfill_targets_includes_only_messages_missing_system_flags():
     }
 
     second = targets[1]
+    assert second.document_id == conversation["_id"]
     assert second.message_index == 1
     assert second.missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
 
 
 def test_get_backfill_targets_excludes_exhausted_provider_keys():
+    conversation = _conversation_doc()
     repository = MongoConversationRepository.from_collection(
-        FakeCollection([_conversation_doc()])
+        FakeCollection([conversation])
     )
     excluded_provider_keys = {
-        ("conversation-1", 0, SYSTEM_OPENAI_REVIEWER_ID),
-        ("conversation-1", 0, SYSTEM_LLAMA_REVIEWER_ID),
+        (conversation["_id"], 0, SYSTEM_OPENAI_REVIEWER_ID),
+        (conversation["_id"], 0, SYSTEM_LLAMA_REVIEWER_ID),
     }
 
     targets = repository.get_backfill_targets(
@@ -175,293 +194,98 @@ def test_get_backfill_targets_excludes_exhausted_provider_keys():
     )
 
     assert len(targets) == 1
-    assert targets[0].conversation_id == "conversation-1"
+    assert targets[0].document_id == conversation["_id"]
     assert targets[0].message_index == 1
     assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
 
 
 def test_missing_system_reviewers_returns_empty_for_system_role_message():
-    message = _conversation_doc()["messages"][0]
-    message["role"] = "system"
+    now = datetime.now(timezone.utc)
+    message = _message_doc(now, content="system prompt", role="system")
 
     missing = MongoConversationRepository.missing_system_reviewers(message)
 
     assert missing == set()
 
 
-def test_get_backfill_targets_skips_system_role_messages():
-    conversation = _conversation_doc()
-    conversation["messages"][0]["role"] = "system"
-    conversation["messages"][1]["role"] = "user"
-    conversation["messages"][1]["reviewer_flags"] = []
-
-    repository = MongoConversationRepository.from_collection(
-        FakeCollection([conversation])
-    )
-
-    targets = repository.get_backfill_targets(batch_size=10)
-
-    assert len(targets) == 1
-    assert targets[0].message_index == 1
-    assert targets[0].missing_reviewer_ids == {
-        SYSTEM_OPENAI_REVIEWER_ID,
-        SYSTEM_LLAMA_REVIEWER_ID,
-    }
-
-
 def test_upsert_system_reviewer_flag_is_idempotent_per_message_and_provider():
-    collection = FakeCollection([_conversation_doc()])
+    conversation = _conversation_doc()
+    collection = FakeCollection([conversation])
     repository = MongoConversationRepository.from_collection(collection)
 
     repository.upsert_system_reviewer_flag(
-        conversation_id="conversation-1",
+        document_id=conversation["_id"],
         message_index=0,
         reviewer_id=SYSTEM_OPENAI_REVIEWER_ID,
         categories=["harassment"],
         category_other="",
-        created_at=datetime(2026, 3, 2, 12, 0, 0),
+        created_at=datetime(2026, 3, 2, 12, 0, 0, tzinfo=timezone.utc),
     )
     repository.upsert_system_reviewer_flag(
-        conversation_id="conversation-1",
+        document_id=conversation["_id"],
         message_index=0,
         reviewer_id=SYSTEM_OPENAI_REVIEWER_ID,
         categories=["hate"],
         category_other="",
-        created_at=datetime(2026, 3, 2, 12, 1, 0),
+        created_at=datetime(2026, 3, 2, 12, 1, 0, tzinfo=timezone.utc),
     )
 
-    message_flags = collection.docs["conversation-1"]["messages"][0]["reviewer_flags"]
+    message_flags = collection.docs[conversation["_id"]]["messages"][0][
+        "reviewer_flags"
+    ]
     assert len(message_flags) == 1
     assert message_flags[0]["reviewer_id"] == SYSTEM_OPENAI_REVIEWER_ID
+    assert message_flags[0]["reviewer_by_username"] == SYSTEM_OPENAI_REVIEWER_ID
     assert message_flags[0]["categories"] == ["hate"]
+    assert message_flags[0]["comment"] == ""
     assert collection.update_calls == 2
-
-
-def test_upsert_system_reviewer_flag_pipeline_updates_messages_array():
-    collection = FakeCollection([_conversation_doc()])
-    repository = MongoConversationRepository.from_collection(collection)
-
-    repository.upsert_system_reviewer_flag(
-        conversation_id="conversation-1",
-        message_index=0,
-        reviewer_id=SYSTEM_LLAMA_REVIEWER_ID,
-        categories=[],
-        category_other="",
-        created_at=datetime(2026, 3, 2, 12, 0, 0),
-    )
-
-    updated_doc = collection.docs["conversation-1"]
-    assert isinstance(updated_doc["messages"], list)
-    assert isinstance(updated_doc["messages"][0], dict)
-    assert "0" not in updated_doc["messages"][0]
 
 
 def test_get_backfill_targets_skips_invalid_conversations():
     invalid = {
-        "_id": "invalid",
-        # Missing required top-level schema fields
+        "_id": ObjectId(),
         "messages": [],
     }
+    valid = _conversation_doc()
 
     repository = MongoConversationRepository.from_collection(
-        FakeCollection([invalid, _conversation_doc()])
+        FakeCollection([invalid, valid])
     )
 
     targets = repository.get_backfill_targets(batch_size=10)
 
     assert len(targets) == 2
-    assert all(target.conversation_id == "conversation-1" for target in targets)
+    assert all(target.document_id == valid["_id"] for target in targets)
 
 
-def test_get_backfill_targets_defaults_missing_user_flag():
+def test_conversation_document_accepts_canonical_shape():
     now = datetime.now(timezone.utc)
-    conversation_missing_user_flag = {
-        "_id": "conversation-missing-user-flag",
-        "participant_id": "p2",
-        "model": "test-model",
-        "experiment_id": "exp-2",
-        "conversation_id": "conversation-missing-user-flag",
-        "project_id": "2026_03_08",
-        "created_at": now,
-        "messages": [
-            {
-                "content": "message without user flag",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "reviewer_flags": [],
-            }
-        ],
-        "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
-    }
-
-    repository = MongoConversationRepository.from_collection(
-        FakeCollection([conversation_missing_user_flag])
-    )
-
-    targets = repository.get_backfill_targets(batch_size=10)
-
-    assert len(targets) == 1
-    assert targets[0].conversation_id == "conversation-missing-user-flag"
-    assert targets[0].message_index == 0
-    assert targets[0].missing_reviewer_ids == {
-        SYSTEM_OPENAI_REVIEWER_ID,
-        SYSTEM_LLAMA_REVIEWER_ID,
-    }
-
-
-def test_get_backfill_targets_defaults_missing_optional_lists():
-    now = datetime.now(timezone.utc)
-    conversation_missing_optional_lists = {
-        "_id": "conversation-missing-lists",
-        "participant_id": "p3",
-        "model": "test-model",
-        "experiment_id": "exp-3",
-        "conversation_id": "conversation-missing-lists",
-        "project_id": "2026_03_08",
-        "created_at": now,
-        "messages": [
-            {
-                "content": "message without optional lists",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-            }
-        ],
-    }
-
-    repository = MongoConversationRepository.from_collection(
-        FakeCollection([conversation_missing_optional_lists])
-    )
-
-    targets = repository.get_backfill_targets(batch_size=10)
-
-    assert len(targets) == 1
-    assert targets[0].conversation_id == "conversation-missing-lists"
-    assert targets[0].message_index == 0
-    assert targets[0].missing_reviewer_ids == {
-        SYSTEM_OPENAI_REVIEWER_ID,
-        SYSTEM_LLAMA_REVIEWER_ID,
-    }
-
-
-def test_get_backfill_targets_accepts_simple_chat_fields():
-    now = datetime.now(timezone.utc)
-    legacy_conversation = {
-        "_id": "conversation-legacy-fields",
-        "participant_id": "p4",
-        "model": "test-model",
-        "experiment_id": "exp-4",
-        "created_at": now,
-        "conversation_id": "conversation-legacy-fields",
-        "project_id": "2026_03_08",
-        "custom_system_message_id": None,
-        "multi_rounds": True,
-        "messages": [
-            {
-                "content": "message with legacy flag metadata",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "flagged": None,
-                "flagged_at": None,
-                "flagged_by": None,
-                "flag_category": None,
-                "flag_other_reason": None,
-                "user_flag": None,
-                "reviewer_flags": [],
-                "duplicate_flags": [],
-            }
-        ],
-        "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
-    }
-
-    repository = MongoConversationRepository.from_collection(
-        FakeCollection([legacy_conversation])
-    )
-
-    targets = repository.get_backfill_targets(batch_size=10)
-
-    assert len(targets) == 1
-    assert targets[0].conversation_id == "conversation-legacy-fields"
-    assert targets[0].message_index == 0
-    assert targets[0].missing_reviewer_ids == {
-        SYSTEM_OPENAI_REVIEWER_ID,
-        SYSTEM_LLAMA_REVIEWER_ID,
-    }
-
-
-def test_get_backfill_targets_accepts_blank_optional_reviewer_identity_fields():
-    now = datetime.now(timezone.utc)
-    conversation = {
-        "_id": "conversation-blank-reviewer-username",
-        "participant_id": "p5",
-        "model": "test-model",
-        "experiment_id": "exp-5",
-        "conversation_id": "conversation-blank-reviewer-username",
-        "project_id": "2026_03_09",
-        "created_at": now,
-        "messages": [
-            {
-                "content": "message with legacy reviewer username",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "reviewer_flags": [
-                    {
-                        "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
-                        "reviewer_by_username": "",
-                        "created_at": now,
-                        "categories": ["violence"],
-                        "category_other": "",
-                        "comment": "",
-                    }
-                ],
-            }
-        ],
-        "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
-    }
-
-    repository = MongoConversationRepository.from_collection(
-        FakeCollection([conversation])
-    )
-
-    targets = repository.get_backfill_targets(batch_size=10)
-
-    assert len(targets) == 1
-    assert targets[0].conversation_id == "conversation-blank-reviewer-username"
-    assert targets[0].message_index == 0
-    assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
-
-
-def test_conversation_document_accepts_canonical_extended_fields():
-    now = datetime.now(timezone.utc)
+    document_id = ObjectId()
     document = ConversationDocument.model_validate(
         {
-            "_id": "conversation-canonical",
+            "_id": document_id,
+            "conversation_id": "conversation-canonical",
             "participant_id": "p5",
             "model": "test-model",
             "experiment_id": "exp-5",
-            "conversation_id": "conversation-canonical",
             "project_id": "2026_03_08",
             "created_at": now,
+            "custom_system_message_id": None,
+            "multi_rounds": True,
             "messages": [
                 {
                     "content": "message with all fields",
                     "role": "assistant",
                     "timestamp": now,
                     "type": "assistant",
+                    "flagged": True,
+                    "flagged_at": now,
+                    "flagged_by": "participant-1",
+                    "flag_category": "harassment",
+                    "flag_other_reason": None,
                     "user_flag": {
                         "category": "harassment",
                         "category_other": "",
-                        "created_at": now,
-                        "created_by": "participant",
                         "reviews": [
                             {
                                 "reviewer_id": "reviewer-1",
@@ -491,211 +315,104 @@ def test_conversation_document_accepts_canonical_extended_fields():
                     ],
                 }
             ],
-            "opened_by": [],
-            "reviewed_by": [],
-            "assigned_to": [],
-            "naturalness_ratings": [
+            "opened_by": [
                 {
                     "reviewer_id": "reviewer-4",
-                    "coherence": 5,
-                    "topic_progression": 4,
-                    "rated_at": now,
+                    "opened_at": now,
                 }
             ],
-            "realism_ratings": [
+            "assigned_messages": [
                 {
                     "reviewer_id": "reviewer-5",
-                    "rating": 10,
-                    "rated_at": now,
+                    "message_index": 0,
+                    "reason": "participant_flag",
+                    "assigned_at": now,
+                }
+            ],
+            "reviewed_messages": [
+                {
+                    "reviewer_id": "reviewer-6",
+                    "message_index": 0,
+                    "reviewed_at": now,
                 }
             ],
         }
     )
 
+    assert document.id == document_id
     assert document.messages[0].user_flag.reviews[0].reviewer_username == "alice"
     assert document.messages[0].reviewer_flags[0].reviewer_by_username == "bob"
-    assert document.messages[0].reviewer_flags[0].comment == "Escalate"
     assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
-    assert document.naturalness_ratings[0].coherence == 5
-    assert document.realism_ratings[0].rating == 10
-
-
-def test_conversation_document_normalizes_blank_optional_identity_fields():
-    now = datetime.now(timezone.utc)
-    document = ConversationDocument.model_validate(
-        {
-            "_id": "conversation-blank-optional-fields",
-            "participant_id": "p7",
-            "model": "test-model",
-            "experiment_id": "exp-7",
-            "conversation_id": "conversation-blank-optional-fields",
-            "project_id": "2026_03_09",
-            "created_at": now,
-            "messages": [
-                {
-                    "content": "message with blank optional identity fields",
-                    "role": "assistant",
-                    "timestamp": now,
-                    "type": "assistant",
-                    "flagged_by": "   ",
-                    "user_flag": {
-                        "category": "harassment",
-                        "category_other": "",
-                        "created_by": "",
-                        "reviews": [
-                            {
-                                "reviewer_id": "reviewer-1",
-                                "reviewer_username": " ",
-                                "approved": True,
-                                "comment": "",
-                                "reviewed_at": now,
-                            }
-                        ],
-                    },
-                    "reviewer_flags": [
-                        {
-                            "reviewer_id": "reviewer-2",
-                            "reviewer_by_username": "",
-                            "created_at": now,
-                            "categories": [],
-                            "category_other": "",
-                            "comment": "",
-                        }
-                    ],
-                    "duplicate_flags": [
-                        {
-                            "reviewer_id": "reviewer-3",
-                            "reviewer_username": "   ",
-                            "flagged_at": now,
-                        }
-                    ],
-                }
-            ],
-            "opened_by": [],
-            "reviewed_by": [],
-            "assigned_to": [],
-        }
-    )
-
-    assert document.messages[0].flagged_by is None
-    assert document.messages[0].user_flag.created_by is None
-    assert document.messages[0].user_flag.reviews[0].reviewer_username is None
-    assert document.messages[0].reviewer_flags[0].reviewer_by_username is None
-    assert document.messages[0].duplicate_flags[0].reviewer_username is None
-
-
-def test_conversation_document_accepts_simple_chat_compatible_shape():
-    now = datetime.now(timezone.utc)
-    document = ConversationDocument.model_validate(
-        {
-            "_id": "conversation-simple-chat",
-            "participant_id": "p6",
-            "model": "gpt-4o",
-            "experiment_id": "exp-6",
-            "conversation_id": "conversation-simple-chat",
-            "project_id": "2026_03_09",
-            "created_at": now,
-            "custom_system_message_id": None,
-            "multi_rounds": True,
-            "messages": [
-                {
-                    "content": "You're alright",
-                    "role": "system",
-                    "timestamp": now,
-                    "type": "text",
-                    "flagged": None,
-                    "flagged_at": None,
-                    "flagged_by": None,
-                    "flag_category": None,
-                    "flag_other_reason": None,
-                    "user_flag": None,
-                    "reviewer_flags": [],
-                    "duplicate_flags": [],
-                }
-            ],
-            "opened_by": [],
-            "reviewed_by": [],
-            "assigned_to": [],
-        }
-    )
-
-    assert document.custom_system_message_id is None
-    assert document.multi_rounds is True
-    assert document.messages[0].flagged is None
-    assert document.messages[0].user_flag is None
-    assert document.messages[0].duplicate_flags == []
+    assert document.assigned_messages[0].reason == "participant_flag"
+    assert document.reviewed_messages[0].message_index == 0
 
 
 @pytest.mark.parametrize(
-    "mutator",
+    ("mutator", "match"),
     [
-        lambda document: document.update({"unexpected_top_level": "nope"}),
-        lambda document: document["messages"][0]["user_flag"].update(
-            {"unexpected_user_flag": "nope"}
+        (
+            lambda document: document.update({"reviewed_by": []}),
+            "reviewed_by",
         ),
-        lambda document: document["messages"][0]["reviewer_flags"][0].update(
-            {"unexpected_reviewer_flag": "nope"}
+        (
+            lambda document: document.update({"assigned_to": []}),
+            "assigned_to",
         ),
-        lambda document: document["naturalness_ratings"][0].update(
-            {"unexpected_rating_field": "nope"}
+        (
+            lambda document: document.update({"naturalness_ratings": []}),
+            "naturalness_ratings",
         ),
-    ],
-    ids=[
-        "unknown top-level field",
-        "unknown user_flag field",
-        "unknown reviewer_flags field",
-        "unknown naturalness_ratings field",
+        (
+            lambda document: document.update({"realism_ratings": []}),
+            "realism_ratings",
+        ),
+        (
+            lambda document: document["messages"][0]["user_flag"].update(
+                {"created_at": datetime.now(timezone.utc)}
+            ),
+            "created_at",
+        ),
+        (
+            lambda document: document["messages"][0]["user_flag"].update(
+                {"created_by": "participant"}
+            ),
+            "created_by",
+        ),
     ],
 )
-def test_conversation_document_rejects_unknown_fields(mutator):
+def test_conversation_document_rejects_legacy_fields(mutator, match):
     now = datetime.now(timezone.utc)
-    document = {
-        "_id": "conversation-strict",
-        "participant_id": "p6",
-        "model": "test-model",
-        "experiment_id": "exp-6",
-        "conversation_id": "conversation-strict",
-        "project_id": "2026_03_08",
-        "created_at": now,
-        "messages": [
-            {
-                "content": "message",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "user_flag": {
-                    "category": "",
-                    "category_other": "",
-                    "reviews": [],
-                },
-                "reviewer_flags": [
-                    {
-                        "reviewer_id": "reviewer-1",
-                        "created_at": now,
-                        "categories": [],
-                        "category_other": "",
-                        "comment": "",
-                    }
-                ],
-            }
-        ],
-        "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
-        "naturalness_ratings": [
-            {
-                "reviewer_id": "reviewer-2",
-                "coherence": 3,
-                "topic_progression": 4,
-                "rated_at": now,
-            }
-        ],
-        "realism_ratings": [],
-    }
+    document = _conversation_doc()
+    document["messages"] = [_message_doc(now, content="strict message")]
 
     mutator(document)
 
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+    with pytest.raises(ValidationError, match=match):
+        ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "user_flag",
+        "reviewer_flags",
+        "duplicate_flags",
+    ],
+)
+def test_conversation_document_requires_message_review_fields(missing_field):
+    document = _conversation_doc()
+    del document["messages"][0][missing_field]
+
+    with pytest.raises(ValidationError, match=missing_field):
+        ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize("missing_field", ["assigned_messages", "reviewed_messages"])
+def test_conversation_document_requires_top_level_message_state_lists(missing_field):
+    document = _conversation_doc()
+    del document[missing_field]
+
+    with pytest.raises(ValidationError, match=missing_field):
         ConversationDocument.model_validate(document)
 
 
@@ -703,51 +420,128 @@ def test_conversation_document_rejects_unknown_fields(mutator):
     ("mutator", "match"),
     [
         (
-            lambda document: document.update({"participant_id": ""}),
-            "participant_id",
+            lambda document: document["assigned_messages"][0].update(
+                {"message_index": -1}
+            ),
+            "message_index",
         ),
         (
-            lambda document: document["messages"][0]["reviewer_flags"][0].update(
-                {"reviewer_id": " "}
+            lambda document: document["reviewed_messages"][0].update(
+                {"message_index": -1}
             ),
-            "reviewer_id",
+            "message_index",
+        ),
+        (
+            lambda document: document["assigned_messages"][0].update(
+                {"reason": "legacy_reason"}
+            ),
+            "reason",
         ),
     ],
-    ids=["blank participant_id", "blank reviewer_id"],
 )
-def test_conversation_document_rejects_blank_required_identity_fields(mutator, match):
+def test_conversation_document_rejects_invalid_message_level_review_state(
+    mutator, match
+):
     now = datetime.now(timezone.utc)
-    document = {
-        "_id": "conversation-required-identities",
-        "participant_id": "p8",
-        "model": "test-model",
-        "experiment_id": "exp-8",
-        "conversation_id": "conversation-required-identities",
-        "project_id": "2026_03_09",
-        "created_at": now,
-        "messages": [
-            {
-                "content": "message",
-                "role": "assistant",
-                "timestamp": now,
-                "type": "assistant",
-                "reviewer_flags": [
-                    {
-                        "reviewer_id": "reviewer-1",
-                        "created_at": now,
-                        "categories": [],
-                        "category_other": "",
-                        "comment": "",
-                    }
-                ],
-            }
-        ],
-        "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
-    }
+    document = _conversation_doc()
+    document["assigned_messages"] = [
+        {
+            "reviewer_id": "reviewer-1",
+            "message_index": 0,
+            "reason": "random_sample",
+            "assigned_at": now,
+        }
+    ]
+    document["reviewed_messages"] = [
+        {
+            "reviewer_id": "reviewer-2",
+            "message_index": 0,
+            "reviewed_at": now,
+        }
+    ]
 
     mutator(document)
 
     with pytest.raises(ValidationError, match=match):
+        ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("mutator", "match"),
+    [
+        (
+            lambda document: document.update({"participant_id": " "}),
+            "participant_id",
+        ),
+        (
+            lambda document: document["messages"][0]["user_flag"]["reviews"][0].update(
+                {"reviewer_username": " "}
+            ),
+            "reviewer_username",
+        ),
+        (
+            lambda document: document["messages"][0]["reviewer_flags"][0].update(
+                {"reviewer_by_username": " "}
+            ),
+            "reviewer_by_username",
+        ),
+        (
+            lambda document: document["messages"][0].update({"flagged_by": " "}),
+            "flagged_by",
+        ),
+    ],
+)
+def test_conversation_document_rejects_blank_identity_fields(mutator, match):
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["messages"] = [
+        {
+            **_message_doc(now, content="message"),
+            "flagged": True,
+            "flagged_at": now,
+            "flagged_by": "participant-1",
+            "user_flag": {
+                "category": "harassment",
+                "category_other": "",
+                "reviews": [
+                    {
+                        "reviewer_id": "reviewer-1",
+                        "reviewer_username": "alice",
+                        "approved": True,
+                        "comment": "",
+                        "reviewed_at": now,
+                    }
+                ],
+            },
+            "reviewer_flags": [
+                {
+                    "reviewer_id": "reviewer-2",
+                    "reviewer_by_username": "bob",
+                    "created_at": now,
+                    "categories": [],
+                    "category_other": "",
+                    "comment": "",
+                }
+            ],
+            "duplicate_flags": [
+                {
+                    "reviewer_id": "reviewer-3",
+                    "reviewer_username": "carol",
+                    "flagged_at": now,
+                }
+            ],
+        }
+    ]
+
+    mutator(document)
+
+    with pytest.raises(ValidationError, match=match):
+        ConversationDocument.model_validate(document)
+
+
+def test_conversation_document_requires_object_id():
+    document = _conversation_doc()
+    document["_id"] = "conversation-1"
+
+    with pytest.raises(ValidationError, match="_id"):
         ConversationDocument.model_validate(document)

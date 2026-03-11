@@ -223,7 +223,7 @@ class RealtimeConversationWatcher:
             for target in targets:
                 eligible_reviewer_ids: set[str] = set()
                 for reviewer_id in target.missing_reviewer_ids:
-                    key = (target.conversation_id, target.message_index, reviewer_id)
+                    key = (target.document_id, target.message_index, reviewer_id)
                     if attempts.get(key, 0) >= self.backfill_max_retries:
                         unresolved_provider_keys.add(key)
                         continue
@@ -233,14 +233,14 @@ class RealtimeConversationWatcher:
                     continue
 
                 eligible_target = MessageBackfillTarget(
-                    conversation_id=target.conversation_id,
+                    document_id=target.document_id,
                     message_index=target.message_index,
                     content=target.content,
                     missing_reviewer_ids=eligible_reviewer_ids,
                 )
                 provider_results = self.process_message_target(eligible_target)
                 for reviewer_id in eligible_reviewer_ids:
-                    key = (target.conversation_id, target.message_index, reviewer_id)
+                    key = (target.document_id, target.message_index, reviewer_id)
                     if provider_results.get(reviewer_id, False):
                         attempts.pop(key, None)
                         unresolved_provider_keys.discard(key)
@@ -256,8 +256,8 @@ class RealtimeConversationWatcher:
                     unresolved_provider_keys.add(key)
                     LOGGER.error(
                         "Startup backfill retries exhausted for "
-                        "conversation=%s message_index=%s reviewer_id=%s attempts=%d",
-                        target.conversation_id,
+                        "document_id=%s message_index=%s reviewer_id=%s attempts=%d",
+                        target.document_id,
                         target.message_index,
                         reviewer_id,
                         attempt_count,
@@ -321,7 +321,7 @@ class RealtimeConversationWatcher:
                 continue
 
             target = MessageBackfillTarget(
-                conversation_id=validated_document.get("_id"),
+                document_id=validated_document.get("_id"),
                 message_index=message_index,
                 content=content,
                 missing_reviewer_ids=missing_reviewer_ids,
@@ -402,7 +402,7 @@ class RealtimeConversationWatcher:
             raw_result = rater(target.content)
             categories, category_other = normalizer(raw_result)
             self.repository.upsert_system_reviewer_flag(
-                conversation_id=target.conversation_id,
+                document_id=target.document_id,
                 message_index=target.message_index,
                 reviewer_id=reviewer_id,
                 categories=categories,
@@ -415,9 +415,9 @@ class RealtimeConversationWatcher:
             # pragma: no cover - network/runtime path
             self._provider_failure_counts[reviewer_id] += 1
             LOGGER.exception(
-                "Failed %s rating for conversation=%s message_index=%s",
+                "Failed %s rating for document_id=%s message_index=%s",
                 provider_name,
-                target.conversation_id,
+                target.document_id,
                 target.message_index,
             )
             return False
