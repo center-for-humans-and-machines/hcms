@@ -13,3 +13,4 @@ check_command docker
 
 fancy_echo "Starting local monitoring stack"
 docker compose --file compose.yml up --detach --remove-orphans
+docker compose --file compose.yml watch --no-up
