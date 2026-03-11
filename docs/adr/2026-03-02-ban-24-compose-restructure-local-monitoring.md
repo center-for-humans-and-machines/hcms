@@ -20,7 +20,7 @@ The repository used a single `compose.yaml` file that defined only the
 
 Split Compose files by purpose:
 
-1. `compose.lint.yaml`
+1. `compose.lint.yml`
    - contains only the `super-linter` service.
 2. `compose.yml`
    - contains local runtime services for monitoring:
@@ -31,7 +31,7 @@ Split Compose files by purpose:
 Update script wiring so linting is explicit:
 
 - `script/lint-superlinter` now runs:
-  - `docker compose -f compose.lint.yaml run --rm --remove-orphans super-linter`
+  - `docker compose -f compose.lint.yml run --rm --remove-orphans super-linter`
 
 Add a dedicated watcher image build definition:
 
@@ -95,7 +95,7 @@ Add explicit lifecycle scripts:
 ### Linting
 
 - `./script/lint-superlinter`
-- `docker compose -f compose.lint.yaml run --rm --remove-orphans super-linter`
+- `docker compose -f compose.lint.yml run --rm --remove-orphans super-linter`
 
 ### Local Monitoring
 
