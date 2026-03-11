@@ -19,7 +19,7 @@ services:
       retries: 6
       start_period: 20s
     environment:
-      MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGODB_URI: mongodb://localhost:27017/?directConnection=true
       MONGODB_DATABASE: hpms_local
       MONGODB_COLLECTION: Conversations
       MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "1000"
