@@ -12,4 +12,4 @@ source utils.sh
 check_command docker
 
 fancy_echo "Destroying local monitoring stack"
-docker compose --file compose.monitoring.yaml down --volumes --remove-orphans
+docker compose --file compose.yml down --volumes --remove-orphans
