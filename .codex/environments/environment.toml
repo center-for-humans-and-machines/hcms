@@ -8,14 +8,14 @@ script = ""
 [[actions]]
 name = "Destroy & Start"
 icon = "run"
-command = "./script/destroy-monitoring; ./script/start-monitoring"
+command = "./script/destroy; ./script/start"
 
 [[actions]]
 name = "Start"
 icon = "run"
-command = "./script/start-monitoring"
+command = "./script/start"
 
 [[actions]]
 name = "Destroy"
 icon = "run"
-command = "./script/stop-monitoring"
+command = "./script/stop"

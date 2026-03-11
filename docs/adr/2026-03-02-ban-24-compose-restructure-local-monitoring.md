@@ -22,7 +22,7 @@ Split Compose files by purpose:
 
 1. `compose.lint.yaml`
    - contains only the `super-linter` service.
-2. `compose.monitoring.yaml`
+2. `compose.yml`
    - contains local runtime services for monitoring:
      - `mongo`
      - `mongo-init-rs`
@@ -35,19 +35,19 @@ Update script wiring so linting is explicit:
 
 Add a dedicated watcher image build definition:
 
-- `Dockerfile.monitoring`
+- `Dockerfile`
   - based on `python:3.13-slim`
   - installs Poetry and project dependencies
   - runs `python -m hpms.monitoring.watch_mongo_conversations`
 
 Add explicit lifecycle scripts:
 
-- `script/start-monitoring`
-  - runs `docker compose --file compose.monitoring.yaml up --detach --build --remove-orphans`
-- `script/stop-monitoring`
-  - runs `docker compose --file compose.monitoring.yaml stop`
-- `script/destroy-monitoring`
-  - runs `docker compose --file compose.monitoring.yaml down --volumes --remove-orphans`
+- `script/start`
+  - runs `docker compose --file compose.yml up --detach --build --remove-orphans`
+- `script/stop`
+  - runs `docker compose --file compose.yml stop`
+- `script/destroy`
+  - runs `docker compose --file compose.yml down --volumes --remove-orphans`
 
 ## Local Monitoring Stack Architecture
 
@@ -67,7 +67,7 @@ Add explicit lifecycle scripts:
 
 ### `watcher`
 
-- built from `Dockerfile.monitoring`
+- built from `Dockerfile`
 - depends on `mongo` and successful completion of `mongo-init-rs`
 - runs with restart policy `unless-stopped`
 - environment contract:
@@ -100,11 +100,11 @@ Add explicit lifecycle scripts:
 ### Local Monitoring
 
 - start:
-  - `./script/start-monitoring`
+  - `./script/start`
 - stop:
-  - `./script/stop-monitoring`
+  - `./script/stop`
 - destroy (data loss):
-  - `./script/destroy-monitoring`
+  - `./script/destroy`
 
 ### Validation
 
@@ -119,7 +119,7 @@ writes system `reviewer_flags` entries for:
 - `compose.yaml` is no longer the lint stack filename.
 - `script/lint-superlinter` now has explicit compose file selection.
 - local monitoring now has a canonical Compose entrypoint via
-  `compose.monitoring.yaml`.
+  `compose.yml`.
 - lifecycle operations are explicit through start/stop/destroy scripts.
 
 ## Consequences

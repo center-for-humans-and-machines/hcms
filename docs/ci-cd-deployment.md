@@ -37,7 +37,7 @@ Workflow triggers:
 The `watcher` service follows this flow:
 
 1. Resolve deterministic app/image naming (`<APP_NAME>-watcher-<branch>`).
-1. Build and push Docker image from `Dockerfile.monitoring`.
+1. Build and push Docker image from `Dockerfile`.
 1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
 1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
 
@@ -78,17 +78,17 @@ Optional values with defaults:
 
 ## Required GitHub Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `GITLAB_REGISTRY` | Docker registry host |
-| `APP_NAME` | Application name prefix used in image/release naming |
-| `LLAMA_GUARD_ENDPOINT` | Llama Guard endpoint URL |
-| `LANGFUSE_HOST` | Langfuse base URL used for telemetry export |
-| `MODEL_ENDPOINT` | Chat/completions provider endpoint used by watcher |
-| `BATCH_MODEL_NAME` | Batch model name required by the monitoring configuration import path |
-| `CHAT_COMPLETIONS_MODEL_NAME` | Chat model name used by watcher conversation processing |
-| `MONGODB_DATABASE_DEV` | MongoDB database name for `dev` deployments |
-| `MONGODB_DATABASE_MAIN` | MongoDB database name for `main` deployments |
+| Variable                      | Purpose                                                               |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `GITLAB_REGISTRY`             | Docker registry host                                                  |
+| `APP_NAME`                    | Application name prefix used in image/release naming                  |
+| `LLAMA_GUARD_ENDPOINT`        | Llama Guard endpoint URL                                              |
+| `LANGFUSE_HOST`               | Langfuse base URL used for telemetry export                           |
+| `MODEL_ENDPOINT`              | Chat/completions provider endpoint used by watcher                    |
+| `BATCH_MODEL_NAME`            | Batch model name required by the monitoring configuration import path |
+| `CHAT_COMPLETIONS_MODEL_NAME` | Chat model name used by watcher conversation processing               |
+| `MONGODB_DATABASE_DEV`        | MongoDB database name for `dev` deployments                           |
+| `MONGODB_DATABASE_MAIN`       | MongoDB database name for `main` deployments                          |
 
 Optional variables:
 
@@ -100,19 +100,19 @@ Optional variables:
 
 ## Required GitHub Secrets
 
-| Secret | Purpose |
-|--------|---------|
-| `GITLAB_REGISTRY_USERNAME` | Registry authentication |
-| `GITLAB_REGISTRY_PASSWORD` | Registry authentication |
-| `KUBECONFIG` | Base64-encoded kubeconfig used for Helm deployment |
-| `DOCKERCFG` | Base64 Docker config JSON for Kubernetes image pull secret |
-| `MONGODB_URI_DEV` | Watcher MongoDB URI for `dev` deployments |
-| `MONGODB_URI_MAIN` | Watcher MongoDB URI for `main` deployments |
-| `MODEL_API_KEY` | Provider API key used by watcher conversation processing |
-| `LANGFUSE_PUBLIC_KEY` | Langfuse public API key used by watcher telemetry |
-| `LANGFUSE_SECRET_KEY` | Langfuse secret API key used by watcher telemetry |
-| `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher |
-| `LLAMA_GUARD_API_KEY` | Llama Guard API key used by watcher |
+| Secret                      | Purpose                                                    |
+| --------------------------- | ---------------------------------------------------------- |
+| `GITLAB_REGISTRY_USERNAME`  | Registry authentication                                    |
+| `GITLAB_REGISTRY_PASSWORD`  | Registry authentication                                    |
+| `KUBECONFIG`                | Base64-encoded kubeconfig used for Helm deployment         |
+| `DOCKERCFG`                 | Base64 Docker config JSON for Kubernetes image pull secret |
+| `MONGODB_URI_DEV`           | Watcher MongoDB URI for `dev` deployments                  |
+| `MONGODB_URI_MAIN`          | Watcher MongoDB URI for `main` deployments                 |
+| `MODEL_API_KEY`             | Provider API key used by watcher conversation processing   |
+| `LANGFUSE_PUBLIC_KEY`       | Langfuse public API key used by watcher telemetry          |
+| `LANGFUSE_SECRET_KEY`       | Langfuse secret API key used by watcher telemetry          |
+| `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher                      |
+| `LLAMA_GUARD_API_KEY`       | Llama Guard API key used by watcher                        |
 
 ## Kubernetes Chart Contract
 
