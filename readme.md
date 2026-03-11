@@ -53,6 +53,12 @@ Paper dataset generation and evaluation instructions are documented in:
 
 Use these lifecycle scripts for local MongoDB + watcher:
 
+- Build stack:
+
+  ```sh
+  ./script/build
+  ```
+
 - Start stack:
 
   ```sh
