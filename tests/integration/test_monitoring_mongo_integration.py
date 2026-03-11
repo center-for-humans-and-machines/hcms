@@ -9,6 +9,7 @@ import os
 from typing import Any
 import uuid
 
+from bson import ObjectId
 import pytest
 
 from hpms.database.repository import (
@@ -42,30 +43,38 @@ def _conversation_doc(
 ) -> dict[str, object]:
     now = datetime.now(timezone.utc)
     return {
-        "_id": conversation_id,
+        "_id": ObjectId(),
+        "conversation_id": conversation_id,
         "participant_id": "p1",
         "model": "test-model",
         "experiment_id": "exp-1",
-        "conversation_id": conversation_id,
         "project_id": "2026_03_08",
         "created_at": now,
+        "custom_system_message_id": None,
+        "multi_rounds": True,
         "messages": [
             {
                 "content": "needs moderation",
                 "role": "assistant",
                 "timestamp": now,
                 "type": "assistant",
+                "flagged": False,
+                "flagged_at": None,
+                "flagged_by": None,
+                "flag_category": None,
+                "flag_other_reason": None,
                 "user_flag": {
                     "category": "",
                     "category_other": "",
                     "reviews": [],
                 },
                 "reviewer_flags": reviewer_flags or [],
+                "duplicate_flags": [],
             }
         ],
         "opened_by": [],
-        "reviewed_by": [],
-        "assigned_to": [],
+        "assigned_messages": [],
+        "reviewed_messages": [],
     }
 
 
@@ -83,7 +92,8 @@ def collection():
 
 
 def test_startup_backfill_writes_both_system_flags(collection):
-    collection.insert_one(_conversation_doc("conversation-int-1"))
+    document = _conversation_doc("conversation-int-1")
+    collection.insert_one(document)
     repository = MongoConversationRepository.from_collection(collection)
     watcher = RealtimeConversationWatcher(
         repository=repository,
@@ -94,7 +104,7 @@ def test_startup_backfill_writes_both_system_flags(collection):
 
     watcher.run_startup_backfill()
 
-    stored = collection.find_one({"_id": "conversation-int-1"})
+    stored = collection.find_one({"_id": document["_id"]})
     assert stored is not None
     reviewer_ids = {
         flag["reviewer_id"] for flag in stored["messages"][0]["reviewer_flags"]
@@ -104,13 +114,20 @@ def test_startup_backfill_writes_both_system_flags(collection):
 
 def test_change_event_writes_missing_system_flag(collection):
     now = datetime.now(timezone.utc)
-    openai_flag = {
-        "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
-        "created_at": now,
-        "categories": ["hate"],
-        "category_other": "",
-    }
-    collection.insert_one(_conversation_doc("conversation-int-2", [openai_flag]))
+    document = _conversation_doc(
+        "conversation-int-2",
+        [
+            {
+                "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+                "reviewer_by_username": SYSTEM_OPENAI_REVIEWER_ID,
+                "created_at": now,
+                "categories": ["hate"],
+                "category_other": "",
+                "comment": "",
+            }
+        ],
+    )
+    collection.insert_one(document)
 
     repository = MongoConversationRepository.from_collection(collection)
     watcher = RealtimeConversationWatcher(
@@ -119,12 +136,12 @@ def test_change_event_writes_missing_system_flag(collection):
         llama_guard_rater=lambda _text: "Hate",
     )
 
-    full_document = collection.find_one({"_id": "conversation-int-2"})
+    full_document = collection.find_one({"_id": document["_id"]})
     assert full_document is not None
     event: dict[str, Any] = {"operationType": "insert", "fullDocument": full_document}
     watcher.handle_change_event(event)
 
-    stored = collection.find_one({"_id": "conversation-int-2"})
+    stored = collection.find_one({"_id": document["_id"]})
     assert stored is not None
     reviewer_ids = {
         flag["reviewer_id"] for flag in stored["messages"][0]["reviewer_flags"]
@@ -133,7 +150,8 @@ def test_change_event_writes_missing_system_flag(collection):
 
 
 def test_change_event_does_not_create_duplicate_provider_entries(collection):
-    collection.insert_one(_conversation_doc("conversation-int-3"))
+    document = _conversation_doc("conversation-int-3")
+    collection.insert_one(document)
 
     repository = MongoConversationRepository.from_collection(collection)
     watcher = RealtimeConversationWatcher(
@@ -142,14 +160,14 @@ def test_change_event_does_not_create_duplicate_provider_entries(collection):
         llama_guard_rater=lambda _text: "Hate",
     )
 
-    stale_document = collection.find_one({"_id": "conversation-int-3"})
+    stale_document = collection.find_one({"_id": document["_id"]})
     assert stale_document is not None
     event = {"operationType": "insert", "fullDocument": stale_document}
 
     watcher.handle_change_event(event)
     watcher.handle_change_event(event)
 
-    stored = collection.find_one({"_id": "conversation-int-3"})
+    stored = collection.find_one({"_id": document["_id"]})
     assert stored is not None
     reviewer_flags = stored["messages"][0]["reviewer_flags"]
     assert len(reviewer_flags) == 2

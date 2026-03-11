@@ -21,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 class MessageBackfillTarget:
     """Message that still requires one or more system moderation writes."""
 
-    conversation_id: Any
+    document_id: Any
     message_index: int
     content: str
     missing_reviewer_ids: Set[str]
@@ -133,10 +133,12 @@ class MongoConversationRepository:
                 "conversation_id": 1,
                 "project_id": 1,
                 "created_at": 1,
+                "custom_system_message_id": 1,
+                "multi_rounds": 1,
                 "messages": 1,
                 "opened_by": 1,
-                "reviewed_by": 1,
-                "assigned_to": 1,
+                "reviewed_messages": 1,
+                "assigned_messages": 1,
             },
         )
 
@@ -147,7 +149,7 @@ class MongoConversationRepository:
             if validated_conversation is None:
                 continue
 
-            conversation_id = validated_conversation.get("_id")
+            document_id = validated_conversation.get("_id")
             messages = validated_conversation.get("messages", [])
             if not isinstance(messages, list):
                 continue
@@ -163,7 +165,7 @@ class MongoConversationRepository:
                 missing = {
                     reviewer_id
                     for reviewer_id in missing
-                    if (conversation_id, message_index, reviewer_id)
+                    if (document_id, message_index, reviewer_id)
                     not in excluded_provider_keys
                 }
                 if not missing:
@@ -171,7 +173,7 @@ class MongoConversationRepository:
 
                 targets.append(
                     MessageBackfillTarget(
-                        conversation_id=conversation_id,
+                        document_id=document_id,
                         message_index=message_index,
                         content=content,
                         missing_reviewer_ids=missing,
@@ -183,11 +185,11 @@ class MongoConversationRepository:
         return targets
 
     def get_message(
-        self, conversation_id: Any, message_index: int
+        self, document_id: Any, message_index: int
     ) -> Optional[dict[str, Any]]:
         """Fetch a single message from a conversation document by index."""
         conversation = self.collection.find_one(
-            {"_id": conversation_id},
+            {"_id": document_id},
             projection={"messages": 1},
         )
         if not conversation:
@@ -208,8 +210,8 @@ class MongoConversationRepository:
             validated_message = MessageDocument.model_validate(message)
         except ValidationError as error:
             LOGGER.warning(
-                "Skipping invalid message document conversation=%s index=%s: %s",
-                conversation_id,
+                "Skipping invalid message document document_id=%s index=%s: %s",
+                document_id,
                 message_index,
                 error,
             )
@@ -220,7 +222,7 @@ class MongoConversationRepository:
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def upsert_system_reviewer_flag(
         self,
-        conversation_id: Any,
+        document_id: Any,
         message_index: int,
         reviewer_id: str,
         categories: Iterable[str],
@@ -233,14 +235,16 @@ class MongoConversationRepository:
 
         reviewer_flag = {
             "reviewer_id": reviewer_id,
+            "reviewer_by_username": reviewer_id,
             "created_at": timestamp,
             "categories": normalized_categories,
             "category_other": category_other,
+            "comment": "",
         }
 
         self.collection.update_one(
             {
-                "_id": conversation_id,
+                "_id": document_id,
                 f"messages.{message_index}": {"$exists": True},
             },
             self._build_reviewer_flag_pipeline(
