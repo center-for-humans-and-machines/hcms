@@ -27,7 +27,7 @@ jobs:
         include:
           - service: watcher
             build_context: .
-            dockerfile: Dockerfile.monitoring
+            dockerfile: Dockerfile
 
     steps:
       - name: Checkout code
