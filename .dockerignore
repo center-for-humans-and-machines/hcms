@@ -1,10 +1,23 @@
-.git
-.github
-.vscode
-.venv
-.mypy_cache
-.pytest_cache
-.ruff_cache
+.git/
+.github/
+.vscode/
+.codex/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.venv/
+
+.gitignore
+.editorconfig
+.prettierignore
+.prettierrc.yml
+.pylintrc
+.flake8
+.mypy.ini
+.pre-commit-config.yaml
+.jscpd.json
+.markdownlint.yml
+.DS_Store
 
 __pycache__/
 *.pyc
@@ -13,7 +26,6 @@ __pycache__/
 *.swp
 *.tmp
 
-.DS_Store
 .env
 .env.*
 
@@ -22,18 +34,27 @@ data/*
 notebooks/
 tests/
 docs/
+script/
 
+poetry.toml
+readme.md
+AGENTS.md
+contributing.md
+license
+
+evaluate_dataset.py
+generate_dataset.py
+upload_to_gdrive.py
+utils.sh
+
+compose*.yml
+compose*.yaml
+Dockerfile*
+
+.test_report.xml
 *.png
 *.jpg
 *.jpeg
 *.gif
 *.svg
 *.pdf
-.test_report.xml
-
-script/
-compose*.yaml
-Dockerfile*
-AGENTS.md
-contributing.md
-license
