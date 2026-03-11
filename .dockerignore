@@ -5,6 +5,7 @@
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
+.venv/
 
 .gitignore
 .editorconfig
