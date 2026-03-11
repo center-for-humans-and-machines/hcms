@@ -1,10 +1,10 @@
-name: monitoring
+name: hpms-monitoring
 
 services:
   watcher:
     build:
       context: .
-      dockerfile: Dockerfile.monitoring
+      dockerfile: Dockerfile
     env_file:
       - .env
     restart: unless-stopped
