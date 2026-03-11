@@ -91,7 +91,7 @@ Main tuning variables (set in `.env`):
 Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
 
 ```text
-mongodb://localhost:27017/?directConnection=true
+mongodb://mongo:27017/?replicaSet=rs0
 ```
 
 Note: the local replica set member is advertised as `mongo:27017` inside Docker.

@@ -19,7 +19,7 @@ services:
       retries: 6
       start_period: 20s
     environment:
-      MONGODB_URI: mongodb://localhost:27017/?directConnection=true
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
       MONGODB_DATABASE: hpms_local
       MONGODB_COLLECTION: Conversations
       MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "1000"
@@ -30,6 +30,8 @@ services:
       MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: "30"
       MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "0.25"
       HPMS_LOG_LEVEL: "INFO"
+    networks:
+      - shared-db
 
 networks:
   shared-db:
