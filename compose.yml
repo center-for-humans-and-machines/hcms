@@ -8,6 +8,12 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    develop:
+      watch:
+        - action: rebuild
+          path: hpms
+        - action: rebuild
+          path: Dockerfile
     healthcheck:
       test:
         [
