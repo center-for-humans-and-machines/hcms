@@ -39,8 +39,12 @@ class _NonBlankOptionalFieldMixin:
         """Ensure optional identity strings are either missing or non-blank."""
         if value is None:
             return None
+        if value == "":
+            return value
         if isinstance(value, str) and not value.strip():
-            raise ValueError("Value must contain at least 1 non-whitespace character")
+            raise ValueError(
+                "Value must be empty or contain at least 1 non-whitespace character"
+            )
         return value
 
 
@@ -103,9 +107,19 @@ class MessageDocument(_NonBlankOptionalFieldMixin, BaseModel):
     flagged_by: str | None
     flag_category: str | None
     flag_other_reason: str | None
-    user_flag: UserFlagDocument
+    user_flag: UserFlagDocument | None
     reviewer_flags: list[ReviewerFlagDocument]
     duplicate_flags: list[DuplicateFlagDocument]
+
+    @field_validator("user_flag", mode="before")
+    @classmethod
+    def normalize_empty_user_flag(cls, value: object) -> object:
+        """Treat explicit empty user flag payloads as an absent flag."""
+        if value is None:
+            return None
+        if value == {}:
+            return None
+        return value
 
 
 class OpenedByDocument(_NonBlankRequiredFieldMixin, BaseModel):

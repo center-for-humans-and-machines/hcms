@@ -258,6 +258,20 @@ def test_get_backfill_targets_skips_invalid_conversations():
     assert all(target.document_id == valid["_id"] for target in targets)
 
 
+def test_get_backfill_targets_accepts_messages_with_empty_flag_state():
+    conversation = _conversation_doc()
+    conversation["messages"][0]["flagged_by"] = ""
+    conversation["messages"][0]["user_flag"] = None
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 2
+    assert all(target.document_id == conversation["_id"] for target in targets)
+
+
 def test_conversation_document_accepts_canonical_shape():
     now = datetime.now(timezone.utc)
     document_id = ObjectId()
@@ -394,7 +408,6 @@ def test_conversation_document_rejects_legacy_fields(mutator, match):
 @pytest.mark.parametrize(
     "missing_field",
     [
-        "user_flag",
         "reviewer_flags",
         "duplicate_flags",
     ],
@@ -405,6 +418,33 @@ def test_conversation_document_requires_message_review_fields(missing_field):
 
     with pytest.raises(ValidationError, match=missing_field):
         ConversationDocument.model_validate(document)
+
+
+def test_conversation_document_requires_user_flag_field():
+    document = _conversation_doc()
+    del document["messages"][0]["user_flag"]
+
+    with pytest.raises(ValidationError, match="user_flag"):
+        ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize("user_flag", [None, {}])
+def test_conversation_document_accepts_empty_user_flag_states(user_flag):
+    document = _conversation_doc()
+    document["messages"][0]["user_flag"] = user_flag
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].user_flag is None
+
+
+def test_conversation_document_accepts_empty_flagged_by_string():
+    document = _conversation_doc()
+    document["messages"][0]["flagged_by"] = ""
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].flagged_by == ""
 
 
 @pytest.mark.parametrize("missing_field", ["assigned_messages", "reviewed_messages"])
