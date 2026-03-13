@@ -66,7 +66,7 @@ jobs:
           poetry run python generate_dataset.py --round-number=${{ matrix.round_number }} --tag=regression-pipeline
 
       - name: Archive data generation results to GitHub
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: reg-test-gen-round-${{ matrix.round_number }}-${{ matrix.chat_model }}-${{ github.run_id }}
           path: |
@@ -126,7 +126,7 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
 
       - name: Download artifacts for current round
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           pattern: reg-test-gen-round-${{ matrix.round_number }}-*-${{ github.run_id }}
           merge-multiple: true
@@ -146,7 +146,7 @@ jobs:
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
       - name: Archive data evaluation results to GitHub
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: reg-test-eval-round-${{ matrix.round_number }}-${{ github.run_id }}
           path: |
