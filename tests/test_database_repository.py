@@ -364,6 +364,21 @@ def test_conversation_document_accepts_canonical_shape():
                     "reviewed_at": now,
                 }
             ],
+            "naturalness_ratings": [
+                {
+                    "reviewer_id": "reviewer-7",
+                    "rated_at": now,
+                    "coherence": 4,
+                    "topic_progression": 3,
+                }
+            ],
+            "realism_ratings": [
+                {
+                    "reviewer_id": "reviewer-8",
+                    "rated_at": now,
+                    "rating": 10,
+                }
+            ],
         }
     )
 
@@ -373,6 +388,8 @@ def test_conversation_document_accepts_canonical_shape():
     assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
     assert document.assigned_messages[0].reason == "participant_flag"
     assert document.reviewed_messages[0].message_index == 0
+    assert document.naturalness_ratings[0].coherence == 4
+    assert document.realism_ratings[0].rating == 10
 
 
 @pytest.mark.parametrize(
@@ -385,14 +402,6 @@ def test_conversation_document_accepts_canonical_shape():
         (
             lambda document: document.update({"assigned_to": []}),
             "assigned_to",
-        ),
-        (
-            lambda document: document.update({"naturalness_ratings": []}),
-            "naturalness_ratings",
-        ),
-        (
-            lambda document: document.update({"realism_ratings": []}),
-            "realism_ratings",
         ),
         (
             lambda document: document["messages"][0]["user_flag"].update(
@@ -605,3 +614,51 @@ def test_conversation_document_requires_object_id():
 
     with pytest.raises(ValidationError, match="_id"):
         ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize("category_other", [None, ""])
+def test_reviewer_flag_accepts_null_and_empty_category_other(category_other):
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["messages"] = [
+        {
+            **_message_doc(now, content="message"),
+            "reviewer_flags": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "reviewer_by_username": "alice",
+                    "created_at": now,
+                    "categories": [],
+                    "category_other": category_other,
+                    "comment": "",
+                }
+            ],
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].reviewer_flags[0].category_other == category_other
+
+
+def test_reviewer_flag_category_other_defaults_to_none_when_omitted():
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["messages"] = [
+        {
+            **_message_doc(now, content="message"),
+            "reviewer_flags": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "reviewer_by_username": "alice",
+                    "created_at": now,
+                    "categories": [],
+                    "comment": "",
+                }
+            ],
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].reviewer_flags[0].category_other is None

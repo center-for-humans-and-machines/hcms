@@ -77,7 +77,7 @@ class ReviewerFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
     reviewer_by_username: str = Field(..., min_length=1)
     created_at: datetime
     categories: list[str]
-    category_other: str
+    category_other: str | None = None
     comment: str
 
 
@@ -150,6 +150,27 @@ class AssignedMessageDocument(_NonBlankRequiredFieldMixin, BaseModel):
     assigned_at: datetime
 
 
+class NaturalnessRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
+    """Human evaluation rating for conversational naturalness."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    rated_at: datetime
+    coherence: int
+    topic_progression: int
+
+
+class RealismRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
+    """Human evaluation rating for conversational realism."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    rated_at: datetime
+    rating: int
+
+
 class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """MongoDB conversation document matching the dashboard schema."""
 
@@ -172,6 +193,8 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
     opened_by: list[OpenedByDocument]
     assigned_messages: list[AssignedMessageDocument]
     reviewed_messages: list[ReviewedMessageDocument]
+    naturalness_ratings: list[NaturalnessRatingDocument] = Field(default_factory=list)
+    realism_ratings: list[RealismRatingDocument] = Field(default_factory=list)
 
     @field_validator("participant_id", mode="before")
     @classmethod
