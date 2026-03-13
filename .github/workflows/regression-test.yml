@@ -22,7 +22,7 @@ env:
 
 jobs:
   gen-data:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -92,7 +92,7 @@ jobs:
         if: always()
 
   eval-data:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: gen-data
     strategy:
       matrix:
