@@ -272,34 +272,6 @@ def test_get_backfill_targets_accepts_messages_with_empty_flag_state():
     assert all(target.document_id == conversation["_id"] for target in targets)
 
 
-def test_get_backfill_targets_accepts_conversation_rating_fields():
-    now = datetime.now(timezone.utc)
-    conversation = _conversation_doc()
-    conversation["naturalness_ratings"] = [
-        {
-            "reviewer_id": "reviewer-1",
-            "rated_at": now,
-            "coherence": 4,
-            "topic_progression": 2,
-        }
-    ]
-    conversation["realism_ratings"] = [
-        {
-            "reviewer_id": "reviewer-1",
-            "rated_at": now,
-            "rating": 10,
-        }
-    ]
-    repository = MongoConversationRepository.from_collection(
-        FakeCollection([conversation])
-    )
-
-    targets = repository.get_backfill_targets(batch_size=10)
-
-    assert len(targets) == 2
-    assert all(target.document_id == conversation["_id"] for target in targets)
-
-
 @pytest.mark.parametrize("participant_id", ["", " "])
 def test_get_backfill_targets_accepts_blank_participant_id(participant_id):
     conversation = _conversation_doc()
@@ -358,7 +330,7 @@ def test_conversation_document_accepts_canonical_shape():
                             "reviewer_by_username": "bob",
                             "created_at": now,
                             "categories": ["hate"],
-                            "category_other": None,
+                            "category_other": "",
                             "comment": "Escalate",
                         }
                     ],
@@ -392,33 +364,15 @@ def test_conversation_document_accepts_canonical_shape():
                     "reviewed_at": now,
                 }
             ],
-            "naturalness_ratings": [
-                {
-                    "reviewer_id": "reviewer-7",
-                    "rated_at": now,
-                    "coherence": 4,
-                    "topic_progression": 2,
-                }
-            ],
-            "realism_ratings": [
-                {
-                    "reviewer_id": "reviewer-7",
-                    "rated_at": now,
-                    "rating": 10,
-                }
-            ],
         }
     )
 
     assert document.id == document_id
     assert document.messages[0].user_flag.reviews[0].reviewer_username == "alice"
     assert document.messages[0].reviewer_flags[0].reviewer_by_username == "bob"
-    assert document.messages[0].reviewer_flags[0].category_other is None
     assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
     assert document.assigned_messages[0].reason == "participant_flag"
     assert document.reviewed_messages[0].message_index == 0
-    assert document.naturalness_ratings[0].coherence == 4
-    assert document.realism_ratings[0].rating == 10
 
 
 @pytest.mark.parametrize(
@@ -431,6 +385,14 @@ def test_conversation_document_accepts_canonical_shape():
         (
             lambda document: document.update({"assigned_to": []}),
             "assigned_to",
+        ),
+        (
+            lambda document: document.update({"naturalness_ratings": []}),
+            "naturalness_ratings",
+        ),
+        (
+            lambda document: document.update({"realism_ratings": []}),
+            "realism_ratings",
         ),
         (
             lambda document: document["messages"][0]["user_flag"].update(
@@ -497,15 +459,6 @@ def test_conversation_document_accepts_empty_flagged_by_string():
     validated = ConversationDocument.model_validate(document)
 
     assert validated.messages[0].flagged_by == ""
-
-
-def test_conversation_document_defaults_missing_conversation_rating_fields():
-    document = _conversation_doc()
-
-    validated = ConversationDocument.model_validate(document)
-
-    assert validated.naturalness_ratings == []
-    assert validated.realism_ratings == []
 
 
 @pytest.mark.parametrize("participant_id", ["", " "])
