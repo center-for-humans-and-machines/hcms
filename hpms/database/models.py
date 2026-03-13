@@ -77,7 +77,7 @@ class ReviewerFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
     reviewer_by_username: str = Field(..., min_length=1)
     created_at: datetime
     categories: list[str]
-    category_other: str | None
+    category_other: str | None = None
     comment: str
 
 

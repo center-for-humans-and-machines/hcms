@@ -614,3 +614,51 @@ def test_conversation_document_requires_object_id():
 
     with pytest.raises(ValidationError, match="_id"):
         ConversationDocument.model_validate(document)
+
+
+@pytest.mark.parametrize("category_other", [None, ""])
+def test_reviewer_flag_accepts_null_and_empty_category_other(category_other):
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["messages"] = [
+        {
+            **_message_doc(now, content="message"),
+            "reviewer_flags": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "reviewer_by_username": "alice",
+                    "created_at": now,
+                    "categories": [],
+                    "category_other": category_other,
+                    "comment": "",
+                }
+            ],
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].reviewer_flags[0].category_other == category_other
+
+
+def test_reviewer_flag_category_other_defaults_to_none_when_omitted():
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["messages"] = [
+        {
+            **_message_doc(now, content="message"),
+            "reviewer_flags": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "reviewer_by_username": "alice",
+                    "created_at": now,
+                    "categories": [],
+                    "comment": "",
+                }
+            ],
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].reviewer_flags[0].category_other is None
