@@ -15,8 +15,6 @@ class _NonBlankRequiredFieldMixin:
         "reviewer_id",
         "reviewer_username",
         "reviewer_by_username",
-        "participant_id",
-        "experiment_id",
         "conversation_id",
         "project_id",
         mode="before",
@@ -163,7 +161,7 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
 
     id: ObjectId = Field(..., alias="_id")
     conversation_id: str = Field(..., min_length=1)
-    participant_id: str = Field(..., min_length=1)
+    participant_id: str | None = Field(...)
     model: str = Field(..., min_length=1)
     experiment_id: str = Field(..., min_length=1)
     project_id: str = Field(..., min_length=1)
@@ -174,3 +172,11 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
     opened_by: list[OpenedByDocument]
     assigned_messages: list[AssignedMessageDocument]
     reviewed_messages: list[ReviewedMessageDocument]
+
+    @field_validator("participant_id", mode="before")
+    @classmethod
+    def normalize_blank_participant_id(cls, value: object) -> object:
+        """Treat blank participant IDs as absent instead of invalid."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value

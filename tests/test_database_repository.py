@@ -272,6 +272,20 @@ def test_get_backfill_targets_accepts_messages_with_empty_flag_state():
     assert all(target.document_id == conversation["_id"] for target in targets)
 
 
+@pytest.mark.parametrize("participant_id", ["", " "])
+def test_get_backfill_targets_accepts_blank_participant_id(participant_id):
+    conversation = _conversation_doc()
+    conversation["participant_id"] = participant_id
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert len(targets) == 2
+    assert all(target.document_id == conversation["_id"] for target in targets)
+
+
 def test_conversation_document_accepts_canonical_shape():
     now = datetime.now(timezone.utc)
     document_id = ObjectId()
@@ -447,6 +461,16 @@ def test_conversation_document_accepts_empty_flagged_by_string():
     assert validated.messages[0].flagged_by == ""
 
 
+@pytest.mark.parametrize("participant_id", ["", " "])
+def test_conversation_document_normalizes_blank_participant_id(participant_id):
+    document = _conversation_doc()
+    document["participant_id"] = participant_id
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.participant_id is None
+
+
 @pytest.mark.parametrize("missing_field", ["assigned_messages", "reviewed_messages"])
 def test_conversation_document_requires_top_level_message_state_lists(missing_field):
     document = _conversation_doc()
@@ -509,10 +533,6 @@ def test_conversation_document_rejects_invalid_message_level_review_state(
 @pytest.mark.parametrize(
     ("mutator", "match"),
     [
-        (
-            lambda document: document.update({"participant_id": " "}),
-            "participant_id",
-        ),
         (
             lambda document: document["messages"][0]["user_flag"]["reviews"][0].update(
                 {"reviewer_username": " "}
