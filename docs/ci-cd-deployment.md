@@ -31,6 +31,9 @@ Workflow triggers:
   - `REGISTRY`: `${{ vars.GITLAB_REGISTRY }}`
   - `DOCKER_REGISTRY_PREFIX`: `${{ vars.DOCKER_REGISTRY_PREFIX || 'mpib/chm/common/base-images' }}`
   - `NAMESPACE`: `${{ vars.K8S_NAMESPACE || 'elderbot' }}`
+- GitHub Actions deployment environment:
+  - `dev` branch deploys to the `dev` GitHub environment
+  - `main` branch deploys to the `main` GitHub environment
 
 ## Build and Deploy Logic
 
