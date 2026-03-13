@@ -139,6 +139,8 @@ class MongoConversationRepository:
                 "opened_by": 1,
                 "reviewed_messages": 1,
                 "assigned_messages": 1,
+                "naturalness_ratings": 1,
+                "realism_ratings": 1,
             },
         )
 
