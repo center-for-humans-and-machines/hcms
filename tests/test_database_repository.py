@@ -364,6 +364,21 @@ def test_conversation_document_accepts_canonical_shape():
                     "reviewed_at": now,
                 }
             ],
+            "naturalness_ratings": [
+                {
+                    "reviewer_id": "reviewer-7",
+                    "rated_at": now,
+                    "coherence": 4,
+                    "topic_progression": 3,
+                }
+            ],
+            "realism_ratings": [
+                {
+                    "reviewer_id": "reviewer-8",
+                    "rated_at": now,
+                    "rating": 10,
+                }
+            ],
         }
     )
 
@@ -373,6 +388,8 @@ def test_conversation_document_accepts_canonical_shape():
     assert document.messages[0].duplicate_flags[0].reviewer_username == "carol"
     assert document.assigned_messages[0].reason == "participant_flag"
     assert document.reviewed_messages[0].message_index == 0
+    assert document.naturalness_ratings[0].coherence == 4
+    assert document.realism_ratings[0].rating == 10
 
 
 @pytest.mark.parametrize(
@@ -385,14 +402,6 @@ def test_conversation_document_accepts_canonical_shape():
         (
             lambda document: document.update({"assigned_to": []}),
             "assigned_to",
-        ),
-        (
-            lambda document: document.update({"naturalness_ratings": []}),
-            "naturalness_ratings",
-        ),
-        (
-            lambda document: document.update({"realism_ratings": []}),
-            "realism_ratings",
         ),
         (
             lambda document: document["messages"][0]["user_flag"].update(
