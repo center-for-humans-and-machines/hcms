@@ -520,6 +520,52 @@ def test_conversation_document_accepts_canonical_extended_fields():
     assert document.realism_ratings[0].rating == 10
 
 
+def test_conversation_document_accepts_assigned_and_reviewed_messages():
+    now = datetime.now(timezone.utc)
+    document = ConversationDocument.model_validate(
+        {
+            "_id": "conversation-message-level-assignments",
+            "participant_id": "p6",
+            "model": "test-model",
+            "experiment_id": "exp-6",
+            "conversation_id": "conversation-message-level-assignments",
+            "project_id": "2026_03_08",
+            "created_at": now,
+            "messages": [
+                {
+                    "content": "hello",
+                    "role": "user",
+                    "timestamp": now,
+                    "type": "text",
+                }
+            ],
+            "assigned_messages": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "message_index": 0,
+                    "reason": "random_sample",
+                    "assigned_at": now,
+                }
+            ],
+            "reviewed_messages": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "message_index": 0,
+                    "reviewed_at": now,
+                }
+            ],
+        }
+    )
+
+    assert len(document.assigned_messages) == 1
+    assert document.assigned_messages[0].reviewer_id == "reviewer-1"
+    assert document.assigned_messages[0].message_index == 0
+    assert document.assigned_messages[0].reason == "random_sample"
+    assert len(document.reviewed_messages) == 1
+    assert document.reviewed_messages[0].reviewer_id == "reviewer-1"
+    assert document.reviewed_messages[0].message_index == 0
+
+
 def test_conversation_document_normalizes_blank_optional_identity_fields():
     now = datetime.now(timezone.utc)
     document = ConversationDocument.model_validate(
