@@ -318,7 +318,7 @@ jobs:
     name: Deployment Summary
     runs-on: ubuntu-latest
     needs: [build-images, deploy-services]
-    if: always()
+    if: ${{ !cancelled() }}
 
     steps:
       - name: Download build metadata
