@@ -148,6 +148,27 @@ class ConversationAssignmentDocument(_NonBlankRequiredIdentityFieldMixin, BaseMo
     assigned_at: datetime
 
 
+class MessageAssignmentDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
+    """Assignment metadata for a reviewer and a specific message index."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    message_index: int
+    reason: str = Field(..., min_length=1)
+    assigned_at: datetime
+
+
+class ReviewedMessageDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
+    """Reviewed-state entry for a specific message index."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str = Field(..., min_length=1)
+    message_index: int
+    reviewed_at: datetime
+
+
 class NaturalnessRatingDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     """Naturalness rating metadata for a conversation."""
 
@@ -187,5 +208,7 @@ class ConversationDocument(_NonBlankRequiredIdentityFieldMixin, BaseModel):
     opened_by: List[OpenedByDocument] = Field(default_factory=list)
     reviewed_by: List[ReviewedByDocument] = Field(default_factory=list)
     assigned_to: List[ConversationAssignmentDocument] = Field(default_factory=list)
+    assigned_messages: List[MessageAssignmentDocument] = Field(default_factory=list)
+    reviewed_messages: List[ReviewedMessageDocument] = Field(default_factory=list)
     naturalness_ratings: List[NaturalnessRatingDocument] = Field(default_factory=list)
     realism_ratings: List[RealismRatingDocument] = Field(default_factory=list)
