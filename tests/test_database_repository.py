@@ -392,6 +392,41 @@ def test_conversation_document_accepts_canonical_shape():
     assert document.realism_ratings[0].rating == 10
 
 
+def test_conversation_document_backfills_legacy_naturalness_topic_progression():
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["naturalness_ratings"] = [
+        {
+            "reviewer_id": "reviewer-7",
+            "rated_at": now,
+            "coherence": 3,
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.naturalness_ratings[0].coherence == 3
+    assert validated.naturalness_ratings[0].topic_progression == 3
+
+
+def test_validate_conversation_document_accepts_legacy_naturalness_rating():
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["naturalness_ratings"] = [
+        {
+            "reviewer_id": "reviewer-7",
+            "rated_at": now,
+            "coherence": 3,
+        }
+    ]
+
+    validated = MongoConversationRepository.validate_conversation_document(document)
+
+    assert validated is not None
+    assert validated["naturalness_ratings"][0]["coherence"] == 3
+    assert validated["naturalness_ratings"][0]["topic_progression"] == 3
+
+
 @pytest.mark.parametrize(
     ("mutator", "match"),
     [

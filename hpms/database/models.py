@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from bson import ObjectId
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # pylint: disable=too-few-public-methods
@@ -159,6 +159,21 @@ class NaturalnessRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
     rated_at: datetime
     coherence: int
     topic_progression: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def backfill_legacy_topic_progression(cls, value: object) -> object:
+        """Reuse the legacy single naturalness score when progression is absent."""
+        if not isinstance(value, dict):
+            return value
+        if "topic_progression" in value:
+            return value
+        if "coherence" not in value:
+            return value
+        return {
+            **value,
+            "topic_progression": value["coherence"],
+        }
 
 
 class RealismRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
