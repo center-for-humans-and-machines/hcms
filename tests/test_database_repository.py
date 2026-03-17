@@ -697,3 +697,28 @@ def test_reviewer_flag_category_other_defaults_to_none_when_omitted():
     validated = ConversationDocument.model_validate(document)
 
     assert validated.messages[0].reviewer_flags[0].category_other is None
+
+
+@pytest.mark.parametrize("comment", [None, ""])
+def test_reviewer_flag_accepts_null_and_empty_comment(comment):
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["messages"] = [
+        {
+            **_message_doc(now, content="message"),
+            "reviewer_flags": [
+                {
+                    "reviewer_id": "reviewer-1",
+                    "reviewer_by_username": "alice",
+                    "created_at": now,
+                    "categories": [],
+                    "category_other": "",
+                    "comment": comment,
+                }
+            ],
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.messages[0].reviewer_flags[0].comment == comment

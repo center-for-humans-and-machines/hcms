@@ -78,7 +78,7 @@ class ReviewerFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
     created_at: datetime
     categories: list[str]
     category_other: str | None = None
-    comment: str
+    comment: str | None = None
 
 
 class DuplicateFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
