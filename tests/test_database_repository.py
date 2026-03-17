@@ -524,6 +524,23 @@ def test_conversation_document_requires_top_level_message_state_lists(missing_fi
         ConversationDocument.model_validate(document)
 
 
+def test_conversation_document_accepts_llm_flag_assignment_reason():
+    now = datetime.now(timezone.utc)
+    document = _conversation_doc()
+    document["assigned_messages"] = [
+        {
+            "reviewer_id": "reviewer-1",
+            "message_index": 0,
+            "reason": "llm_flag",
+            "assigned_at": now,
+        }
+    ]
+
+    validated = ConversationDocument.model_validate(document)
+
+    assert validated.assigned_messages[0].reason == "llm_flag"
+
+
 @pytest.mark.parametrize(
     ("mutator", "match"),
     [
