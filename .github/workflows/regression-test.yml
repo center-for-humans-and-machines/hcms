@@ -2,6 +2,8 @@ name: Regression testing
 
 on: # yamllint disable-line rule:truthy
   workflow_dispatch: # Enables manual trigger
+  schedule:
+    - cron: "0 6 * * *"
 
 env:
   BATCH_PROVIDER: openai
