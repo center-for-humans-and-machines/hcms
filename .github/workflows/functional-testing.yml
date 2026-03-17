@@ -9,6 +9,7 @@ env:
   MODEL_API_KEY: dummy-key
   MODEL_ENDPOINT: dummy-endpoint
   BATCH_MODEL_NAME: dummy-batch-model
+  CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.CHAT_COMPLETIONS_MODEL_NAME }}
 
 jobs:
   pytest:
