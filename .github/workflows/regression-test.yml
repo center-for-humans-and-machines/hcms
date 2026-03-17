@@ -30,7 +30,8 @@ jobs:
       matrix:
         round_number: [2, 3]
         chat_model:
-          - gpt-4o-mini-2024-07-18
+          - gpt-4o-2024-08-06
+          - gpt-5.3-chat-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
