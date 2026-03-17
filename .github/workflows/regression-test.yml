@@ -5,6 +5,10 @@ on: # yamllint disable-line rule:truthy
   schedule:
     - cron: "0 6 * * *"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BATCH_PROVIDER: openai
   BATCH_MODEL_NAME: ${{ vars.BATCH_MODEL_NAME }}
@@ -90,7 +94,7 @@ jobs:
             echo "- $line" >> $GITHUB_STEP_SUMMARY
           done
           echo "Dataset count: $(ls -1 data/dataset/*.json | wc -l)" >> $GITHUB_STEP_SUMMARY
-        if: always()
+        if: ${{ !cancelled() }}
 
   eval-data:
     runs-on: ubuntu-latest
@@ -176,4 +180,4 @@ jobs:
           ls data/dataset/rated-*.json 2>/dev/null | while read file; do
             echo "- $file" >> $GITHUB_STEP_SUMMARY
           done || echo "No rated datasets found" >> $GITHUB_STEP_SUMMARY
-        if: always()
+        if: ${{ !cancelled() }}

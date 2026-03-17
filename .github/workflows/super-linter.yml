@@ -11,6 +11,10 @@ on: # yamllint disable-line rule:truthy
   pull_request: null
   workflow_dispatch: # Enables manual trigger
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:

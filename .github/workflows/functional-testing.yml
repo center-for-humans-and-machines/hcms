@@ -5,6 +5,10 @@ on: # yamllint disable-line rule:truthy
   pull_request: null
   workflow_dispatch: # Enables manual trigger
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   MODEL_API_KEY: dummy-key
   MODEL_ENDPOINT: dummy-endpoint
@@ -51,4 +55,4 @@ jobs:
         with:
           paths: ".test_report.xml"
           show: "fail"
-        if: always()
+        if: ${{ !cancelled() }}

@@ -67,7 +67,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
       - name: Write build metadata
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           SERVICE: ${{ matrix.service }}
@@ -93,7 +93,7 @@ jobs:
           } > "build-meta/${SERVICE}.env"
 
       - name: Upload build metadata
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v6
         with:
           name: build-meta-${{ matrix.service }}
@@ -267,7 +267,7 @@ jobs:
           dockercfg: ${{ secrets.DOCKERCFG }}
 
       - name: Write deploy metadata
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           SERVICE: ${{ matrix.service }}
@@ -309,7 +309,7 @@ jobs:
           } > "deploy-meta/${SERVICE}.env"
 
       - name: Upload deploy metadata
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v6
         with:
           name: deploy-meta-${{ matrix.service }}
