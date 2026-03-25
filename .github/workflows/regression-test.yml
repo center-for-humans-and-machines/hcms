@@ -30,9 +30,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        round_number: [2]
+        round_number: [2, 3]
         chat_model:
           - gpt-4o-2024-08-06
+          - gpt-5.3-chat-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -100,7 +101,7 @@ jobs:
     needs: gen-data
     strategy:
       matrix:
-        round_number: [2]
+        round_number: [2, 3]
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

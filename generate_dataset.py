@@ -114,7 +114,7 @@ async def generate_dataset(
 
     # Get conversation type and starters based on round
     conversation_type = get_conversation_type(round_number)
-    conversation_starters = get_conversation_starters(round_number)[:1]
+    conversation_starters = get_conversation_starters(round_number)
 
     # Run all starters
     for i, starter in tqdm(
@@ -201,7 +201,7 @@ async def main():
     if args.tag:
         tag = [args.tag]
 
-    await generate_dataset(args.round_number, max_turns=1, tags=tag)
+    await generate_dataset(args.round_number, max_turns=5, tags=tag)
 
 
 if __name__ == "__main__":
