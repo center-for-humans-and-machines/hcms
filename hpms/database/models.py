@@ -146,7 +146,7 @@ class AssignedMessageDocument(_NonBlankRequiredFieldMixin, BaseModel):
 
     reviewer_id: str = Field(..., min_length=1)
     message_index: int = Field(..., ge=0)
-    reason: Literal["random_sample", "participant_flag", "expert_escalation"]
+    reason: Literal["random_sample", "participant_flag", "expert_escalation", "llm_flag"]
     assigned_at: datetime
 
 
