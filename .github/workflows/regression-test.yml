@@ -140,6 +140,14 @@ jobs:
         run: |
           ls -R
 
+      - name: Debug OpenAI key suffix
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          key="${OPENAI_API_KEY:?missing OPENAI_API_KEY}"
+          echo "OPENAI_API_KEY_LAST4=${key: -4}"
+
       - name: Run regression tests
         env:
           MODEL_API_KEY: ${{ secrets.OPENAI_API_KEY }}
