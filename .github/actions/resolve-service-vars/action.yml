@@ -60,7 +60,7 @@ runs:
           dev|main|elderbot-msw-2026)
             ;;
           *)
-            echo "Unsupported branch: ${branch}. Expected dev or main." >&2
+            echo "Unsupported branch: ${branch}. Expected dev, main, or elderbot-msw-2026." >&2
             exit 1
             ;;
         esac
