@@ -46,6 +46,11 @@ The `watcher` service follows this flow:
 1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
 1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
 
+Naming note:
+
+- For `dev` and `main`, the name is `hpms-watcher-<APP_NAME>-<branch>`.
+- For `elderbot-msw-2026`, the name is `hpms-watcher-<APP_NAME_MSW>-msw`.
+
 ### Runtime deployment variables
 
 The workflow writes this contract into `/tmp/deployment_vars.yml`:

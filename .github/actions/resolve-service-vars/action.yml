@@ -66,7 +66,10 @@ runs:
         esac
 
         # Compose a stable Helm release + image name.
-        if [[ "$branch" == "elderbot-msw-2026" && -n "${{ inputs.app-name-msw-prefix }}" ]]; then
+        #
+        # For the MSW branch we use a stable "-msw" suffix so the release name
+        # does not redundantly include the branch twice (e.g. APP_NAME_MSW=elderbot-msw-2026).
+        if [[ "$branch" == "elderbot-msw-2026" ]]; then
           app_name="hpms-watcher-${{ inputs.app-name-prefix }}-msw"
         else
           app_name="hpms-watcher-${{ inputs.app-name-prefix }}-${branch}"
