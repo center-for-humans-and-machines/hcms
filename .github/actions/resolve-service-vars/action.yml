@@ -66,8 +66,11 @@ runs:
         esac
 
         # Compose a stable Helm release + image name.
-        # Desired format: hpms-<service>-<APP_NAME>-<branch>
-        app_name="hpms-${service}-${{ inputs.app-name-prefix }}-${branch}"
+        if [[ "$branch" == "elderbot-msw-2026" && -n "${{ inputs.app-name-msw-prefix }}" ]]; then
+          app_name="hpms-watcher-${{ inputs.app-name-prefix }}-msw"
+        else
+          app_name="hpms-watcher-${{ inputs.app-name-prefix }}-${branch}"
+        fi
         image_name="${app_name}"
         image_tag="${sha::7}"
         full_image="${{ inputs.registry }}/${{ inputs.docker-registry-prefix }}/${image_name}:${image_tag}"
