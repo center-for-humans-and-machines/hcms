@@ -2,7 +2,7 @@ name: Deployment
 
 on:
   push:
-    branches: [dev, main]
+    branches: [dev, main, elderbot-msw-2026]
   workflow_dispatch:
 
 permissions:
@@ -142,8 +142,10 @@ jobs:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           MONGODB_URI_DEV: ${{ secrets.MONGODB_URI_DEV }}
           MONGODB_URI_MAIN: ${{ secrets.MONGODB_URI_MAIN }}
+          MONGODB_URI_MSW: ${{ secrets.MONGODB_URI_MSW }}
           MONGODB_DATABASE_DEV: ${{ vars.MONGODB_DATABASE_DEV }}
           MONGODB_DATABASE_MAIN: ${{ vars.MONGODB_DATABASE_MAIN }}
+          MONGODB_DATABASE_MSW: ${{ vars.MONGODB_DATABASE_MSW }}
           OPENAI_MODERATION_API_KEY: ${{ secrets.OPENAI_MODERATION_API_KEY }}
           LLAMA_GUARD_API_KEY: ${{ secrets.LLAMA_GUARD_API_KEY }}
           LLAMA_GUARD_ENDPOINT: ${{ vars.LLAMA_GUARD_ENDPOINT }}
@@ -168,6 +170,10 @@ jobs:
             main)
               mongodb_uri="$MONGODB_URI_MAIN"
               mongodb_database="$MONGODB_DATABASE_MAIN"
+              ;;
+            elderbot-msw-2026)
+              mongodb_uri="$MONGODB_URI_MSW"
+              mongodb_database="$MONGODB_DATABASE_MSW"
               ;;
             *)
               echo "Unsupported branch: ${branch}" >&2

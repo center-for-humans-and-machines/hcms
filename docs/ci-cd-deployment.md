@@ -18,6 +18,7 @@ Supported deployment branches:
 
 - `dev`
 - `main`
+- `elderbot-msw-2026`
 
 Workflow triggers:
 
@@ -34,6 +35,7 @@ Workflow triggers:
 - GitHub Actions deployment environment:
   - `dev` branch deploys to the `dev` GitHub environment
   - `main` branch deploys to the `main` GitHub environment
+  - `elderbot-msw-2026` branch deploys to the `elderbot-msw-2026` GitHub environment
 
 ## Build and Deploy Logic
 
@@ -92,6 +94,7 @@ Optional values with defaults:
 | `CHAT_COMPLETIONS_MODEL_NAME` | Chat model name used by watcher conversation processing               |
 | `MONGODB_DATABASE_DEV`        | MongoDB database name for `dev` deployments                           |
 | `MONGODB_DATABASE_MAIN`       | MongoDB database name for `main` deployments                          |
+| `MONGODB_DATABASE_MSW`        | MongoDB database name for `elderbot-msw-2026` deployments             |
 
 Optional variables:
 
@@ -111,6 +114,7 @@ Optional variables:
 | `DOCKERCFG`                 | Base64 Docker config JSON for Kubernetes image pull secret |
 | `MONGODB_URI_DEV`           | Watcher MongoDB URI for `dev` deployments                  |
 | `MONGODB_URI_MAIN`          | Watcher MongoDB URI for `main` deployments                 |
+| `MONGODB_URI_MSW`           | Watcher MongoDB URI for `elderbot-msw-2026` deployments    |
 | `MODEL_API_KEY`             | Provider API key used by watcher conversation processing   |
 | `LANGFUSE_PUBLIC_KEY`       | Langfuse public API key used by watcher telemetry          |
 | `LANGFUSE_SECRET_KEY`       | Langfuse secret API key used by watcher telemetry          |
