@@ -33,6 +33,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Validate MSW app name variable
+        if: github.ref_name == 'elderbot-msw-2026'
+        shell: bash
+        run: |
+          [[ -n "${{ vars.APP_NAME_MSW }}" ]] || {
+            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
+            exit 1
+          }
+
       - name: Resolve service variables
         id: vars
         uses: ./.github/actions/resolve-service-vars
@@ -116,6 +125,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Validate MSW app name variable
+        if: github.ref_name == 'elderbot-msw-2026'
+        shell: bash
+        run: |
+          [[ -n "${{ vars.APP_NAME_MSW }}" ]] || {
+            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
+            exit 1
+          }
 
       - name: Resolve service variables
         id: vars
