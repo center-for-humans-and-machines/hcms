@@ -15,7 +15,7 @@ inputs:
     description: Registry namespace/prefix
     required: true
   branch:
-    description: Git branch name (dev or main)
+    description: Git branch name (dev, main, or elderbot-msw-2026)
     required: true
   sha:
     description: Git commit SHA
@@ -57,7 +57,7 @@ runs:
         esac
 
         case "$branch" in
-          dev|main)
+          dev|main|elderbot-msw-2026)
             ;;
           *)
             echo "Unsupported branch: ${branch}. Expected dev or main." >&2
