@@ -41,7 +41,7 @@ Workflow triggers:
 
 The `watcher` service follows this flow:
 
-1. Resolve deterministic app/image naming (`<APP_NAME>-watcher-<branch>`).
+1. Resolve deterministic app/image naming (`hpms-watcher-<APP_NAME>-<branch>`).
 1. Build and push Docker image from `Dockerfile`.
 1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
 1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
@@ -86,7 +86,8 @@ Optional values with defaults:
 | Variable                      | Purpose                                                               |
 | ----------------------------- | --------------------------------------------------------------------- |
 | `GITLAB_REGISTRY`             | Docker registry host                                                  |
-| `APP_NAME`                    | Application name prefix used in image/release naming                  |
+| `APP_NAME`                    | Application slug used in image/release naming (no `hpms-` prefix)     |
+| `APP_NAME_MSW`                | Application slug for MSW environment (elderbot-msw-2026 branch)       |
 | `LLAMA_GUARD_ENDPOINT`        | Llama Guard endpoint URL                                              |
 | `LANGFUSE_HOST`               | Langfuse base URL used for telemetry export                           |
 | `MODEL_ENDPOINT`              | Chat/completions provider endpoint used by watcher                    |
@@ -120,6 +121,10 @@ Optional variables:
 | `LANGFUSE_SECRET_KEY`       | Langfuse secret API key used by watcher telemetry          |
 | `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher                      |
 | `LLAMA_GUARD_API_KEY`       | Llama Guard API key used by watcher                        |
+
+## Rename / migration note (Helm release name)
+
+The resolved app name is used as the **Helm release name**. If you change the naming scheme (or change `APP_NAME`), Helm will treat it as a different release and will **create a new release** on the next deployment, leaving the old release behind until you remove it.
 
 ## Kubernetes Chart Contract
 

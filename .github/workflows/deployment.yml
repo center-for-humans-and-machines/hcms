@@ -38,7 +38,7 @@ jobs:
         uses: ./.github/actions/resolve-service-vars
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ vars.APP_NAME }}
+          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
@@ -122,7 +122,7 @@ jobs:
         uses: ./.github/actions/resolve-service-vars
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ vars.APP_NAME }}
+          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
