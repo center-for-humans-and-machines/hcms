@@ -9,9 +9,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import subprocess
+import tempfile
+
 import numpy as np
 import pandas as pd
 import polars as pl
+from IPython.display import Image as IPImage
 from IPython.display import display
 from plotnine import (
     aes,
@@ -29,6 +33,11 @@ from plotnine import (
 
 from hpms.evaluation.reg_test_categories_plots import (
     plot_flags_by_turn_separate_legends_stacked,
+)
+from hpms.evaluation.reg_test_moderation_agreement import (
+    compute_moderation_agreement,
+    plot_moderation_agreement,
+    print_agreement_summary,
 )
 from hpms.evaluation.reg_test_categories_table import (
     generate_flag_categories_latex_table,
@@ -463,6 +472,13 @@ def calculate_comprehensive_statistics(
                 except Exception as e:
                     print(f"    Error processing OpenAI moderation: {e}")
 
+            # 5) Cross-system agreement (requires both files)
+            if llama_file and llama_file.exists() and openai_file and openai_file.exists():
+                try:
+                    safety_stats.update(compute_moderation_agreement(llama_file, openai_file))
+                except Exception as e:
+                    print(f"    Error computing moderation agreement: {e}")
+
             # merge (fixes your overwrite bug)
             merged = {"diversity": diversity_stats, "safety": safety_stats}
             results[date][round_key] = merged
@@ -617,6 +633,82 @@ def create_metrics_plot(
     return p
 
 
+# ---------------------------------------------------------------------------
+# LaTeX → JPEG rendering
+# ---------------------------------------------------------------------------
+_LATEX_PREAMBLE = r"""
+\documentclass{standalone}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\newcommand{\llama}{Llama}
+\newcommand{\openai}{OpenAI}
+"""
+
+
+def render_latex_table_to_jpeg(
+    latex_str: str,
+    output_path: str,
+    dpi: int = 200,
+) -> Optional[str]:
+    """Compile a LaTeX table string to a JPEG image via tectonic.
+
+    Extracts the ``tabular`` environment from *latex_str*, wraps it in a
+    minimal standalone document, compiles with tectonic, converts the PDF
+    to JPEG via pdf2image, and writes the result to *output_path*.
+
+    Args:
+        latex_str: Full LaTeX table (may include ``table*`` wrapper).
+        output_path: Destination JPEG file path.
+        dpi: Resolution for the output image.
+
+    Returns:
+        *output_path* on success, or ``None`` if compilation failed.
+    """
+    import re as _re
+
+    from pdf2image import convert_from_path
+
+    # Extract the tabular environment (strip the float wrapper)
+    m = _re.search(r"(\\begin\{tabular\}.*?\\end\{tabular\})", latex_str, _re.DOTALL)
+    if not m:
+        print("render_latex_table_to_jpeg: no tabular environment found.")
+        return None
+
+    # Pull \small and \setlength if present, for accurate rendering
+    preamble_extras = ""
+    if r"\small" in latex_str:
+        preamble_extras += r"\small" + "\n"
+    ts_m = _re.search(r"(\\setlength\{\\tabcolsep\}\{[^}]+\})", latex_str)
+    if ts_m:
+        preamble_extras += ts_m.group(1) + "\n"
+
+    doc = _LATEX_PREAMBLE + r"\begin{document}" + "\n" + preamble_extras + m.group(1) + "\n" + r"\end{document}"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tex = Path(tmp) / "table.tex"
+        tex.write_text(doc, encoding="utf-8")
+        result = subprocess.run(
+            ["tectonic", str(tex)],
+            cwd=tmp,
+            capture_output=True,
+            text=True,
+        )
+        pdf = Path(tmp) / "table.pdf"
+        if not pdf.exists():
+            print(f"tectonic failed:\n{result.stderr}")
+            return None
+
+        images = convert_from_path(str(pdf), dpi=dpi)
+        if not images:
+            print("pdf2image: no pages produced.")
+            return None
+
+        images[0].save(output_path, "JPEG", quality=95)
+
+    return output_path
+
+
 def run_comprehensive_analysis(
     data_dir: Path,
     ratings_dir: Path,
@@ -742,13 +834,27 @@ def run_comprehensive_analysis(
     data = load_json_data(output_file)
 
     print("📊 Generating LaTeX tables...")
-    # Generate main LaTeX table
     latex_table = generate_latex_table(data)
     results["main_latex_table"] = latex_table
 
-    # Generate flag categories LaTeX table
     flag_categories_table = generate_flag_categories_latex_table(data)
     results["flag_categories_table"] = flag_categories_table
+
+    if show_plots or save_plots:
+        print("🖼️  Rendering table previews...")
+        for table_str, label, suffix in [
+            (latex_table,           "Main statistics table",    "main"),
+            (flag_categories_table, "Flag categories table",    "flags"),
+        ]:
+            jpeg_path = f"table_{suffix}_{file_prefix}.jpg"
+            out = render_latex_table_to_jpeg(table_str, jpeg_path)
+            if out:
+                results[f"table_{suffix}_jpeg"] = out
+                if show_plots:
+                    print(f"\n{label}:")
+                    display(IPImage(filename=out))
+            else:
+                print(f"⚠️  Could not render {label} to JPEG.")
 
     print("📈 Creating flag analysis plots...")
     llama_plot, openai_plot = plot_flags_by_turn_separate_legends_stacked(
@@ -763,6 +869,18 @@ def run_comprehensive_analysis(
 
     results["llama_plot"] = llama_plot
     results["openai_plot"] = openai_plot
+
+    print("🔁 Creating moderation agreement plots...")
+    agreement_plots = plot_moderation_agreement(
+        data,
+        save_path=f"moderation_agreement_{file_prefix}.pdf",
+    )
+    plot_keys = ["agreement_overlap", "agreement_jaccard", "agreement_kappa", "agreement_confusion"]
+    for key, p in zip(plot_keys, agreement_plots):
+        if p and show_plots:
+            display(p)
+        results[key] = p
+    print_agreement_summary(data)
 
     print(f"\n📋 Summary: {len(actual_dates)} day(s), {actual_start} → {actual_end}")
     print(f"Conversation types: {', '.join(df['conversation_type'].unique().sort())}")
