@@ -3,6 +3,7 @@ over multiple days."""
 
 import ast
 import json
+import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ import polars as pl
 from IPython.display import display
 from plotnine import (
     aes,
+    element_text,
     facet_wrap,
     geom_line,
     geom_point,
@@ -38,7 +40,7 @@ from hpms.evaluation.self_bleu import (
 )
 from hpms.evaluation.unique_n_grams import percent_unique_ngrams
 from hpms.evaluation.zipf import calculate_zipf_coefficient
-from hpms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element
+from hpms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element, _RESOLVED
 
 
 def filter_assistant_messages(df: pl.DataFrame) -> pl.DataFrame:
@@ -87,18 +89,21 @@ def process_llama_guard_scores(file_path: Path) -> Dict[str, Any]:
             - categories_count: Dict of category names and their flag counts
             - per_turn_analysis: Dict with turn numbers as keys and flag counts as values
     """
+    from hpms.evaluation.reg_test_categories_plots import LLAMA_GUARD_CATEGORIES
+
     # Read the JSON file
     df = pl.read_json(file_path.expanduser())
 
     # Total messages
     total_messages = df.shape[0]
 
-    # Flagged messages (score != "0")
-    flagged_messages = df.filter(pl.col("llama_guard_score") != "0").shape[0]
+    # Valid flagged messages: score is a known category (excludes "0" and malformed values)
+    valid_flagged = df.filter(pl.col("llama_guard_score").is_in(list(LLAMA_GUARD_CATEGORIES)))
+    flagged_messages = valid_flagged.shape[0]
 
     # Categories and their counts
     categories_df = (
-        df.filter(pl.col("llama_guard_score") != "0")
+        valid_flagged
         .group_by("llama_guard_score")
         .agg(pl.len().alias("count"))
         .sort("llama_guard_score")
@@ -109,7 +114,7 @@ def process_llama_guard_scores(file_path: Path) -> Dict[str, Any]:
 
     # Per turn analysis
     per_turn_df = (
-        df.filter(pl.col("llama_guard_score") != "0")
+        valid_flagged
         .group_by(["turn", "llama_guard_score"])
         .agg(pl.len().alias("count"))
         .sort(["turn", "llama_guard_score"])
@@ -344,15 +349,39 @@ def calculate_comprehensive_statistics(
     data_dir: Path,
     ratings_dir: Path,
     output_file: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Calculate diversity and safety statistics for each day (with caching)."""
+    """Calculate diversity and safety statistics for each day.
+
+    Args:
+        data_dir: Path to dataset directory (date-named subdirs with dataset JSON files).
+        ratings_dir: Path to ratings directory (date-named subdirs with rated JSON files).
+        output_file: If given, save results to this JSON file.
+        start_date: Inclusive lower bound in YYYY-MM-DD format. Defaults to no lower bound.
+        end_date: Inclusive upper bound in YYYY-MM-DD format. Defaults to no upper bound.
+    """
     results: Dict[str, Dict[str, Any]] = defaultdict(dict)
 
-    # find all date folders
+    # find all date folders (any YYYY-MM-DD named directory)
     date_folders = [
-        d for d in ratings_dir.iterdir() if d.is_dir() and d.name.startswith("2025-08-")
+        d
+        for d in ratings_dir.iterdir()
+        if d.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", d.name)
     ]
     date_folders.sort()
+
+    # apply date range filter
+    if start_date:
+        date_folders = [d for d in date_folders if d.name >= start_date]
+    if end_date:
+        date_folders = [d for d in date_folders if d.name <= end_date]
+
+    if not date_folders:
+        print(f"No date folders found in range [{start_date}, {end_date}].")
+        return {}
+
+    print(f"Processing {len(date_folders)} date(s): {date_folders[0].name} → {date_folders[-1].name}")
 
     for date_folder in date_folders:
         date = date_folder.name
@@ -362,30 +391,29 @@ def calculate_comprehensive_statistics(
             round_key = f"round_{round_num}"
             print(f"  Processing round {round_num}...")
 
-            # declare inputs
-            dataset_file = (
-                data_dir
-                / date
-                / f"dataset-round-{round_num}-gpt-4o-mini-2024-07-18.json"
+            # Find dataset files by glob (model name may vary across runs);
+            # use the first match to keep one comparable dataset per round/day.
+            def _first(files):
+                return next(iter(sorted(files)), None)
+
+            dataset_file = _first((data_dir / date).glob(f"dataset-round-{round_num}-*.json"))
+            llama_file = _first(date_folder.glob(f"rated-llama-guard-dataset-round-{round_num}-*.json"))
+            llm_judge_file = _first(
+                date_folder.glob(
+                    f"rated-llm-judge-rated-openai-moderation-dataset-round-{round_num}-*.json"
+                )
             )
-            llama_file = (
-                date_folder
-                / f"rated-llama-guard-dataset-round-{round_num}-gpt-4o-mini-2024-07-18.json"
-            )
-            llm_judge_file = (
-                date_folder
-                / f"rated-llm-judge-rated-openai-moderation-dataset-round-{round_num}-gpt-4o-mini-2024-07-18.json"
-            )
-            openai_file = (
-                date_folder
-                / f"rated-openai-moderation-dataset-round-{round_num}-gpt-4o-mini-2024-07-18.json"
-            )
+            openai_file = _first(date_folder.glob(f"rated-openai-moderation-dataset-round-{round_num}-*.json"))
 
             # compute fresh
             diversity_stats: Dict[str, Any] = {}
             safety_stats: Dict[str, Any] = {}
 
             try:
+                if dataset_file is None:
+                    raise FileNotFoundError(
+                        f"No dataset file found for round {round_num} in {data_dir / date}"
+                    )
                 params = {"sample_size": None, "n_gram": 4}
                 # compute fresh
                 df = pl.read_json(dataset_file)
@@ -415,21 +443,21 @@ def calculate_comprehensive_statistics(
                 print(f"    Error processing dataset: {e}")
 
             # 2) Llama Guard
-            if llama_file.exists():
+            if llama_file and llama_file.exists():
                 try:
                     safety_stats.update(process_llama_guard_scores(llama_file))
                 except Exception as e:
                     print(f"    Error processing Llama Guard: {e}")
 
             # 3) LLM Judge
-            if llm_judge_file.exists():
+            if llm_judge_file and llm_judge_file.exists():
                 try:
                     safety_stats.update(process_llm_judge_scores(llm_judge_file))
                 except Exception as e:
                     print(f"    Error processing LLM Judge {llm_judge_file}:\n{e}")
 
             # 4) OpenAI moderation
-            if openai_file.exists():
+            if openai_file and openai_file.exists():
                 try:
                     safety_stats.update(process_openai_moderation_scores(openai_file))
                 except Exception as e:
@@ -510,7 +538,7 @@ def create_metrics_plot(
     df: pl.DataFrame,
     metrics: List[str],
     metric_labels: Dict[str, str],
-    fig_size: Tuple[int, int] = (16, 12),
+    fig_size: Tuple[float, float] = (PlotConfig.ACM_TEXT_WIDTH, 3.2),
 ) -> ggplot:
     """Create publication-ready time series plots for metrics.
 
@@ -553,12 +581,24 @@ def create_metrics_plot(
         plot_df["conversation_type"], categories=["Standardized", "Open-ended"]
     )
 
-    # Create theme elements
+    # ACM TIST theme elements
+    acm_text = _get_text_element(PlotConfig.ACM_FONT_SIZE)
+    acm_text_title = _get_text_element(PlotConfig.ACM_FONT_SIZE_TITLE, bold=True)
     theme_elements = _get_base_theme_elements()
     theme_elements.update(
         {
             "figure_size": fig_size,
-            "strip_text": _get_text_element(PlotConfig.FONT_SIZE_BOLD, bold=True),
+            "axis_title": acm_text_title,
+            "axis_text": acm_text,
+            "axis_text_x": element_text(
+                size=PlotConfig.ACM_FONT_SIZE,
+                angle=45,
+                ha="right",
+                fontfamily=_RESOLVED,
+            ),
+            "legend_title": acm_text_title,
+            "legend_text": acm_text,
+            "strip_text": acm_text_title,
         }
     )
 
@@ -568,7 +608,7 @@ def create_metrics_plot(
         + geom_point(size=3, alpha=0.9)
         + scale_color_manual(values=color_map, name="Prompt Type")
         + scale_x_datetime(date_labels="%b %d", date_breaks="1 day")
-        + facet_wrap("~metric_name", scales="free_y", ncol=2)
+        + facet_wrap("~metric_name", scales="free_y", ncol=3)
         + labs(x="Date", y="Metric Value")
         + theme_minimal()
         + theme(**theme_elements)
@@ -580,36 +620,72 @@ def create_metrics_plot(
 def run_comprehensive_analysis(
     data_dir: Path,
     ratings_dir: Path,
-    output_file: str = "comprehensive_statistics.json",
+    output_file: Optional[str] = None,
     show_plots: bool = True,
     save_plots: bool = True,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     """Run comprehensive analysis including statistics, plots, and tables.
 
     Args:
-        data_dir: Path to the dataset directory
-        ratings_dir: Path to the ratings directory
-        output_file: Name of the output JSON file for statistics
-        show_plots: Whether to display plots in notebook
-        save_plots: Whether to save plots to files
+        data_dir: Path to the dataset directory.
+        ratings_dir: Path to the ratings directory.
+        output_file: Name of the output JSON file. Auto-derived from the date
+            range when not provided (e.g. ``stats_2026-03-25_2026-04-08.json``).
+        show_plots: Whether to display plots in the notebook.
+        save_plots: Whether to save plots to files.
+        start_date: Inclusive start of the analysis window (YYYY-MM-DD).
+            Defaults to the earliest available date.
+        end_date: Inclusive end of the analysis window (YYYY-MM-DD).
+            Defaults to the latest available date.
 
     Returns:
-        dict: Dictionary containing all analysis results
+        dict: Dictionary containing all analysis results.
     """
 
     results = {}
 
     print("🔄 Calculating comprehensive statistics...")
-    # Calculate comprehensive statistics
     stats_results = calculate_comprehensive_statistics(
         data_dir=data_dir,
         ratings_dir=ratings_dir,
-        output_file=output_file,
+        output_file=None,  # save after deriving filename below
+        start_date=start_date,
+        end_date=end_date,
     )
     results["statistics"] = stats_results
 
+    if not stats_results:
+        print("No data to analyse.")
+        return results
+
+    # Derive output filename from actual date range when not provided
+    actual_dates = sorted(stats_results.keys())
+    actual_start = actual_dates[0]
+    actual_end = actual_dates[-1]
+    if output_file is None:
+        output_file = f"stats_{actual_start}_{actual_end}.json"
+
+    # Save statistics JSON
+    def _convert_types(obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, dict):
+            return {k: _convert_types(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_convert_types(i) for i in obj]
+        return obj
+
+    with open(output_file, "w") as _f:
+        json.dump(_convert_types(dict(stats_results)), _f, indent=2)
+    print(f"Statistics saved to {output_file}")
+
     print("📊 Loading and processing data for plotting...")
-    # Load and process data for plotting
     df = load_and_process_data(output_file)
     results["processed_data"] = df
 
@@ -621,13 +697,15 @@ def run_comprehensive_analysis(
         "unique_trigrams_pct": "Unique Trigrams (%)",
     }
 
+    # prefix for all saved files in this run
+    file_prefix = f"{actual_start}_{actual_end}"
+
     print("📈 Creating diversity plots...")
-    # Create and display diversity plot
     diversity_plot = create_metrics_plot(df, diversity_metrics, diversity_labels)
     if show_plots:
         display(diversity_plot)
     if save_plots:
-        diversity_plot.save("diversity_metrics.png", dpi=300, bbox_inches="tight")
+        diversity_plot.save(f"diversity_metrics_{file_prefix}.pdf", dpi=300, bbox_inches="tight")
     results["diversity_plot"] = diversity_plot
 
     # Safety metrics (if available)
@@ -636,7 +714,6 @@ def run_comprehensive_analysis(
         "llm_judge_avg_rating": "LLM Judge Rating",
     }
 
-    # Filter for safety metrics that exist
     available_safety_metrics = [
         m for m in safety_metrics if any(m in row for row in df.to_dicts())
     ]
@@ -651,7 +728,7 @@ def run_comprehensive_analysis(
         if show_plots:
             display(safety_plot)
         if save_plots:
-            safety_plot.save("safety_metrics.png", dpi=300, bbox_inches="tight")
+            safety_plot.save(f"safety_metrics_{file_prefix}.pdf", dpi=300, bbox_inches="tight")
         results["safety_plot"] = safety_plot
 
     # Print summary
@@ -674,8 +751,10 @@ def run_comprehensive_analysis(
     results["flag_categories_table"] = flag_categories_table
 
     print("📈 Creating flag analysis plots...")
-    # Create separate plots with distinct legends
-    llama_plot, openai_plot = plot_flags_by_turn_separate_legends_stacked(data)
+    llama_plot, openai_plot = plot_flags_by_turn_separate_legends_stacked(
+        data,
+        save_path=f"flags_by_turn_{file_prefix}.pdf",
+    )
 
     if llama_plot and show_plots:
         display(llama_plot)
@@ -685,6 +764,8 @@ def run_comprehensive_analysis(
     results["llama_plot"] = llama_plot
     results["openai_plot"] = openai_plot
 
+    print(f"\n📋 Summary: {len(actual_dates)} day(s), {actual_start} → {actual_end}")
+    print(f"Conversation types: {', '.join(df['conversation_type'].unique().sort())}")
     print("✅ Comprehensive analysis complete!")
     return results
 

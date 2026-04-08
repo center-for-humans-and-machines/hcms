@@ -6,6 +6,7 @@ import pandas as pd
 import polars as pl
 from plotnine import (
     aes,
+    element_blank,
     facet_wrap,
     geom_bar,
     ggplot,
@@ -58,7 +59,7 @@ def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
 def create_distribution_plot(
     data: Dict,
     save_path: str = "llm_judge_ratings_distribution.pdf",
-    figsize: Tuple[float, float] = (16, 7),
+    figsize: Tuple[float, float] = (PlotConfig.ACM_TEXT_WIDTH, 3.0),
 ) -> object:
     """Create distribution plot showing frequency of ratings by day.
 
@@ -83,6 +84,9 @@ def create_distribution_plot(
     df_pandas["round_type"] = pd.Categorical(
         df_pandas["round_type"], categories=["Standardized", "Open-Ended"], ordered=True
     )
+    # Sort days numerically ("Day 2" before "Day 10") so facet_wrap respects the order
+    day_order = sorted(df_pandas["day"].unique(), key=lambda d: int(d.split()[1]))
+    df_pandas["day"] = pd.Categorical(df_pandas["day"], categories=day_order, ordered=True)
 
     # Define colors for consistency
     colors = {"Standardized": "#2E86AB", "Open-Ended": "#A23B72"}
@@ -108,15 +112,19 @@ def create_distribution_plot(
         )
     )
 
-    # Apply custom theme
+    # Apply ACM TIST theme: no embedded title, 8–9pt fonts, text-width figure
+    acm_text = _get_text_element(PlotConfig.ACM_FONT_SIZE)
+    acm_text_title = _get_text_element(PlotConfig.ACM_FONT_SIZE_TITLE, bold=True)
     theme_elements = _get_base_theme_elements()
     theme_elements.update(
         {
             "figure_size": figsize,
-            "plot_title": _get_text_element(PlotConfig.FONT_SIZE_BOLD, bold=True),
-            "axis_title": _get_text_element(PlotConfig.FONT_SIZE_REGULAR, bold=True),
-            "legend_title": _get_text_element(PlotConfig.FONT_SIZE_REGULAR, bold=True),
-            "strip_text": _get_text_element(PlotConfig.FONT_SIZE_REGULAR, bold=True),
+            "plot_title": element_blank(),
+            "axis_title": acm_text_title,
+            "axis_text": acm_text,
+            "legend_title": acm_text_title,
+            "legend_text": acm_text,
+            "strip_text": acm_text_title,
         }
     )
     plot = plot + theme(**theme_elements)

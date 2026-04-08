@@ -58,7 +58,7 @@ def format_short_number(n):
 
 
 def generate_latex_table(data, skip_llm_judge=True) -> str:
-    """Generate LaTeX table from JSON   data."""
+    """Generate LaTeX table from JSON data in ACM TIST style."""
 
     # Sort dates
     dates = sorted(data.keys())
@@ -101,20 +101,35 @@ def generate_latex_table(data, skip_llm_judge=True) -> str:
     ]
 
     # Start building the table
+    # ACM TIST style: booktabs, small font, tight column spacing, no resizebox
     table = []
     table.append("\\begin{table*}[t!]")
     table.append("\\centering")
-    table.append("\\resizebox{\linewidth}{!}{%")
+    table.append("\\small")
+    table.append("\\setlength{\\tabcolsep}{4pt}")
     table.append(f"\\begin{{tabular}}{{lll|{'c' * len(dates)}|c}}")
     table.append("\\toprule")
 
     # Header
+    from datetime import datetime as _dt
     date_cols = " & ".join(date_headers)
+    # Short date labels (e.g. "Apr~8") shown under each day number
+    short_date_cols = " & ".join(
+        _dt.strptime(d, "%Y-%m-%d").strftime("%b~%d") for d in dates
+    )
+    first_date_fmt = _dt.strptime(dates[0], "%Y-%m-%d").strftime("%b~%d,~%Y")
+    last_date_fmt = _dt.strptime(dates[-1], "%Y-%m-%d").strftime("%b~%d,~%Y")
+    period_label = (
+        first_date_fmt if len(dates) == 1 else f"{first_date_fmt}--{last_date_fmt}"
+    )
     table.append(
-        f"{{}} & {{}} & {{}} & \\multicolumn{{{len(dates)}}}{{c|}}{{\\textbf{{Days}}}} & \\textbf{{Mean $\pm$ SD}} \\\\"
+        f"{{}} & {{}} & {{}} & \\multicolumn{{{len(dates)}}}{{c|}}{{\\textbf{{Days}} (\\textit{{{period_label}}})}} & \\textbf{{Mean $\\pm$ SD}} \\\\"
     )
     table.append(
         f"\\textbf{{Prompt Type}} & \\textbf{{Metric Type}} & \\textbf{{Metric}} & {date_cols} & \\\\"
+    )
+    table.append(
+        f"& & & {short_date_cols} & \\\\"
     )
     table.append("\\midrule")
 
@@ -401,10 +416,24 @@ def generate_latex_table(data, skip_llm_judge=True) -> str:
 
     table.append("\\bottomrule")
     table.append("\\end{tabular}")
-    table.append("}")
-    table.append("\\vspace{1ex}")
+
+    # Dynamic date range for caption (reuse variables computed for the header)
+    date_range = (
+        first_date_fmt
+        if len(dates) == 1
+        else f"{first_date_fmt}--{last_date_fmt}"
+    )
+
     table.append(
-        f"\\caption{{\\textbf{{Regression testing results over multiple consecutive days with diversity and safety metrics.}} (\\openai=GPT and \\llama=Llama.) $\\uparrow$/$\\downarrow$ indicates whether higher/lower scores are better. \\#~\\llama~Guard flagged and \\#~\\openai~Moderation flagged represent the number of flagged messages for at least one category for Llama Guard and OpenAI Moderation API respectively; percentages in parentheses are computed over the total number of messages for that day ($n={total_current}$). The mean and standard deviation are shown in the last column. Self-BLEU scores report 4-gram vocabulary size in subscript. Vocabulary size is shown to control for the confound that smaller, more uniform vocabularies can artificially inflate Self-BLEU scores. The results were collected during Aug~27--31,~2025. The best scores for each metric within each prompt type are in \\textbf{{bold}}.}}"
+        f"\\caption{{\\textbf{{Regression testing results over {len(dates)} consecutive days with diversity and safety metrics.}}"
+        f" (\\openai=GPT and \\llama=Llama.)"
+        f" $\\uparrow$/$\\downarrow$ indicates whether higher/lower scores are better."
+        f" \\#~\\llama~Guard flagged and \\#~\\openai~Moderation flagged report the number of flagged messages"
+        f" for at least one category; percentages are over the total messages per day ($n=500$)."
+        f" The last column shows mean~$\\pm$~SD."
+        f" Self-BLEU subscripts report 4-gram vocabulary size ($V$)."
+        f" Results were collected from {date_range}."
+        f" Best scores per metric and prompt type are in \\textbf{{bold}}.}}"
     )
     table.append("\\label{tab:comprehensive_metrics}")
     table.append("\\end{table*}")
