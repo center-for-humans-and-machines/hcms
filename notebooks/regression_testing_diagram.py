@@ -280,9 +280,8 @@ for i, (title, subtitle) in enumerate(metrics):
     )
 
 # ── Save ──────────────────────────────────────────────────────────────────────
-out_dir = Path.cwd()
-out_pdf = out_dir / "regression_testing_pipeline_acm_tist.pdf"
-out_png = out_dir / "regression_testing_pipeline_acm_tist.png"
+out_pdf = "/Users/yun/Dev/hpms/diagrams/regression_testing_pipeline_acm_tist.pdf"
+out_png = "/Users/yun/Dev/hpms/diagrams/regression_testing_pipeline_acm_tist.png"
 
 fig.savefig(out_pdf, bbox_inches="tight", facecolor=C_BG)
 fig.savefig(out_png, bbox_inches="tight", facecolor=C_BG)

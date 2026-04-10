@@ -279,8 +279,8 @@ italicnote(0.24,
 # ════════════════════════════════════════════════════════════════════════════
 # SAVE
 # ════════════════════════════════════════════════════════════════════════════
-out_pdf = "/Users/yun/Dev/hpms/realtime_monitoring_pipeline.pdf"
-out_png = "/Users/yun/Dev/hpms/realtime_monitoring_pipeline.png"
+out_pdf = "/Users/yun/Dev/hpms/diagrams/realtime_monitoring_pipeline.pdf"
+out_png = "/Users/yun/Dev/hpms/diagrams/realtime_monitoring_pipeline.png"
 fig.savefig(out_pdf, format="pdf", bbox_inches="tight", facecolor=C_BG, dpi=300)
 fig.savefig(out_png, format="png", bbox_inches="tight", facecolor=C_BG, dpi=300)
 print(f"Saved:\n  {out_pdf}\n  {out_png}")
