@@ -57,11 +57,57 @@ def format_short_number(n):
     return str(n)
 
 
+def _is_iso_date(value, parser):
+    """Return True when value matches YYYY-MM-DD."""
+    try:
+        parser(str(value), "%Y-%m-%d")
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _resolve_date_indexed_data(data, parser):
+    """Resolve the date-indexed stats mapping from supported input shapes."""
+    if not isinstance(data, dict):
+        return {}
+
+    # Preferred shape from run_comprehensive_analysis
+    stats = data.get("statistics")
+    if isinstance(stats, dict):
+        return stats
+
+    # Already date-indexed
+    if any(_is_iso_date(k, parser=parser) for k in data.keys()):
+        return data
+
+    # Fallback: find nested dict with the most date-like keys
+    best_candidate = {}
+    best_count = 0
+    for value in data.values():
+        if not isinstance(value, dict):
+            continue
+        date_count = sum(1 for k in value.keys() if _is_iso_date(k, parser=parser))
+        if date_count > best_count:
+            best_candidate = value
+            best_count = date_count
+    return best_candidate
+
+
 def generate_latex_table(data, skip_llm_judge=True) -> str:
     """Generate LaTeX table from JSON data in ACM TIST style."""
 
-    # Sort dates
-    dates = sorted(data.keys())
+    from datetime import datetime as _dt
+
+    data = _resolve_date_indexed_data(data, parser=_dt.strptime)
+
+    # Sort only valid YYYY-MM-DD date keys; ignore summary keys at top level.
+    dates = sorted(
+        key for key in data.keys() if _is_iso_date(key, parser=_dt.strptime)
+    )
+    if not dates:
+        raise ValueError(
+            "No valid date keys found in data; expected top-level keys like YYYY-MM-DD."
+        )
     # Create day number headers starting from 1
     date_headers = [str(i + 1) for i, _ in enumerate(dates)]
 
@@ -111,7 +157,6 @@ def generate_latex_table(data, skip_llm_judge=True) -> str:
     table.append("\\toprule")
 
     # Header
-    from datetime import datetime as _dt
     date_cols = " & ".join(date_headers)
     # Short date labels (e.g. "Apr~8") shown under each day number
     short_date_cols = " & ".join(

@@ -1,5 +1,6 @@
 """Scientific visualization of LLM judge ratings distribution."""
 
+from datetime import datetime
 from typing import Dict, Tuple
 
 import pandas as pd
@@ -20,6 +21,18 @@ from plotnine import (
 from hpms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element
 
 
+def _resolve_date_indexed_data(data: Dict) -> Dict:
+    """Resolve date-indexed stats mapping from supported input shapes."""
+    if not isinstance(data, dict):
+        return {}
+
+    statistics = data.get("statistics")
+    if isinstance(statistics, dict):
+        return statistics
+
+    return data
+
+
 def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
     """Prepare LLM judge ratings data for distribution plot.
 
@@ -32,9 +45,16 @@ def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
     records = []
     round_mapping = {"round_2": "Standardized", "round_3": "Open-Ended"}
 
+    data = _resolve_date_indexed_data(data)
     sorted_dates = sorted(data.keys())
 
     for day_num, date in enumerate(sorted_dates, 1):
+        try:
+            day_date = datetime.strptime(str(date), "%Y-%m-%d").strftime("%b %d")
+            day_label = f"Day {day_num} ({day_date})"
+        except ValueError:
+            day_label = f"Day {day_num} ({date})"
+
         for round_key, round_name in round_mapping.items():
             if round_key in data[date]:
                 round_data = data[date][round_key]
@@ -47,7 +67,7 @@ def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
                         for rating in llm_judge_data["ratings"]:
                             records.append(
                                 {
-                                    "day": f"Day {day_num}",
+                                    "day": day_label,
                                     "round_type": round_name,
                                     "rating": rating,
                                 }
@@ -91,6 +111,11 @@ def create_distribution_plot(
     # Define colors for consistency
     colors = {"Standardized": "#2E86AB", "Open-Ended": "#A23B72"}
 
+    # Keep all day facets in one row and expand width as needed for readability.
+    min_panel_width = 1.15
+    figure_width = max(figsize[0], len(day_order) * min_panel_width)
+    dynamic_figsize = (figure_width, figsize[1])
+
     # Calculate min and max rating for scale
     min_rating = int(df_pandas["rating"].min())
     max_rating = int(df_pandas["rating"].max())
@@ -104,7 +129,7 @@ def create_distribution_plot(
             breaks=range(min_rating, max_rating + 1),
             limits=(min_rating - 0.5, max_rating + 0.5),
         )
-        + facet_wrap("day", ncol=5)
+        + facet_wrap("day", ncol=max(1, len(day_order)))
         + labs(
             title="Distribution of LLM Judge Safety Ratings by Day",
             x="Rating",
@@ -118,7 +143,7 @@ def create_distribution_plot(
     theme_elements = _get_base_theme_elements()
     theme_elements.update(
         {
-            "figure_size": figsize,
+            "figure_size": dynamic_figsize,
             "plot_title": element_blank(),
             "axis_title": acm_text_title,
             "axis_text": acm_text,
