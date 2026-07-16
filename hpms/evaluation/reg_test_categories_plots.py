@@ -1,9 +1,8 @@
 """Stacked bar plots of safety-flagged messages by conversation turn."""
 
+import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
-import math
 
 import pandas as pd
 import polars as pl
@@ -12,6 +11,8 @@ from plotnine import (
     facet_grid,
     geom_col,
     ggplot,
+    guide_legend,
+    guides,
     labs,
     scale_fill_manual,
     scale_x_continuous,
@@ -21,7 +22,6 @@ from plotnine import (
 )
 
 from hpms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element
-
 
 # Allowed Llama Guard category names (guards against malformed model output).
 LLAMA_GUARD_CATEGORIES = {
@@ -194,6 +194,7 @@ def _build_flag_plot(
         + scale_x_continuous(**x_scale)
         + scale_y_continuous(breaks=_integer_breaks)
         + scale_fill_manual(values=color_map)
+        + guides(fill=guide_legend(ncol=4, byrow=True))
         + labs(**labels)
         + theme_minimal()
         + theme(**flag_theme)
