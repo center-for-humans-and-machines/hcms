@@ -5,6 +5,8 @@ messages (c) travel through the system.
 FIG_W = ACM TIST \textwidth (7.0 in) so matplotlib font sizes == rendered pt sizes.
 """
 
+from pathlib import Path
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -244,8 +246,9 @@ ax.text(FIG_W/2, FOOT_TEXT,
 # ════════════════════════════════════════════════════════════════════════════
 # SAVE
 # ════════════════════════════════════════════════════════════════════════════
-out_pdf = "/Users/yun/Dev/hpms/message_flow_diagram.pdf"
-out_png = "/Users/yun/Dev/hpms/message_flow_diagram.png"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+out_pdf = REPO_ROOT / "message_flow_diagram.pdf"
+out_png = REPO_ROOT / "message_flow_diagram.png"
 fig.savefig(out_pdf, format="pdf", bbox_inches="tight", facecolor=C_BG, dpi=300)
 fig.savefig(out_png, format="png", bbox_inches="tight", facecolor=C_BG, dpi=300)
 print(f"Saved:\n  {out_pdf}\n  {out_png}")
