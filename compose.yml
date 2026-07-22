@@ -1,4 +1,4 @@
-name: hpms-monitoring
+name: hcms-monitoring
 
 services:
   watcher:
@@ -11,7 +11,7 @@ services:
     develop:
       watch:
         - action: rebuild
-          path: hpms
+          path: hcms
         - action: rebuild
           path: Dockerfile
     healthcheck:
@@ -26,7 +26,7 @@ services:
       start_period: 20s
     environment:
       MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
-      MONGODB_DATABASE: hpms_local
+      MONGODB_DATABASE: hcms_local
       MONGODB_COLLECTION: Conversations
       MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: "1000"
       MONGODB_BACKFILL_BATCH_SIZE: "200"
@@ -35,7 +35,7 @@ services:
       MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: "1"
       MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: "30"
       MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "0.25"
-      HPMS_LOG_LEVEL: "INFO"
+      HCMS_LOG_LEVEL: "INFO"
     networks:
       - shared-db
 
