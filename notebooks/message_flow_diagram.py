@@ -240,7 +240,7 @@ ax.text(bx + tick + 0.05, (b_top + b_bot)/2,
 # ── footnote (two lines so it stays narrower than the diagram) ────────────────
 ax.plot([LM, RM], [FOOT_LINE, FOOT_LINE], color="#DDDDDD", lw=0.5)
 ax.text(FIG_W/2, FOOT_TEXT,
-        "Monitoring Dashboard: hpms-dashboard (Express + Socket.io + React 18)\n"
+        "Monitoring Dashboard: hcms-dashboard (Express + Socket.io + React 18)\n"
         "reviewer_flags: LlamaGuard-4-12B / omni-moderation-2024-09-26",
         ha="center", va="center",
         fontsize=FS_SMALL, color=C_MUTED, style="italic")
