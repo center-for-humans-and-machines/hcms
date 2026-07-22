@@ -33,6 +33,6 @@ COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/pytho
 COPY . .
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import hpms.database.models, pymongo, pydantic" || exit 1
+  CMD python -c "import hcms.database.models, pymongo, pydantic" || exit 1
 
-CMD ["python", "-m", "hpms.monitoring.watch_mongo_conversations"]
+CMD ["python", "-m", "hcms.monitoring.watch_mongo_conversations"]

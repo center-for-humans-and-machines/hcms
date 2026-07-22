@@ -14,7 +14,7 @@ The repository used a single `compose.yaml` file that defined only the
 1. The default Compose filename implied it was the general project stack, but it
    was only for linting.
 2. The new MongoDB watcher runtime for BAN-24 needs a dedicated local stack
-   including MongoDB replica set initialization and the HPMS watcher process.
+   including MongoDB replica set initialization and the HCMS watcher process.
 
 ## Decision
 
@@ -38,7 +38,7 @@ Add a dedicated watcher image build definition:
 - `Dockerfile`
   - based on `python:3.13-slim`
   - installs Poetry and project dependencies
-  - runs `python -m hpms.monitoring.watch_mongo_conversations`
+  - runs `python -m hcms.monitoring.watch_mongo_conversations`
 
 Add explicit lifecycle scripts:
 
@@ -72,7 +72,7 @@ Add explicit lifecycle scripts:
 - runs with restart policy `unless-stopped`
 - environment contract:
   - `MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0`
-  - `MONGODB_DATABASE=hpms_local`
+  - `MONGODB_DATABASE=hcms_local`
   - `MONGODB_COLLECTION=Conversations`
   - `MONGODB_CHANGE_STREAM_MAX_AWAIT_MS=1000`
   - `MONGODB_BACKFILL_BATCH_SIZE=200`
@@ -81,7 +81,7 @@ Add explicit lifecycle scripts:
   - `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS=1`
   - `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS=30`
   - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS=0.25`
-  - `HPMS_LOG_LEVEL=INFO`
+  - `HCMS_LOG_LEVEL=INFO`
   - `OPENAI_MODERATION_API_KEY`
   - `LLAMA_GUARD_API_KEY`
   - `LLAMA_GUARD_ENDPOINT`
@@ -108,7 +108,7 @@ Add explicit lifecycle scripts:
 
 ### Validation
 
-Insert a valid conversation into `hpms_local.Conversations` and verify watcher
+Insert a valid conversation into `hcms_local.Conversations` and verify watcher
 writes system `reviewer_flags` entries for:
 
 - `system_openai_moderation`

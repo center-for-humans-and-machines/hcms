@@ -3,11 +3,9 @@
 import argparse
 import asyncio
 
-from hpms.rating.llama_guard import rate_conversations_with_llama_guard
-from hpms.rating.llm_judge import rate_conversations_with_llm_as_judge
-from hpms.rating.openai_moderation import (
-    rate_conversations_with_openai,
-)
+from hcms.rating.llama_guard import rate_conversations_with_llama_guard
+from hcms.rating.llm_judge import rate_conversations_with_llm_as_judge
+from hcms.rating.openai_moderation import rate_conversations_with_openai
 
 
 async def evaluate_dataset(round_number: int):
