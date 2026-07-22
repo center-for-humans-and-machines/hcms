@@ -32,14 +32,14 @@ C_ACCENT  = "#4C566A"
 C_ARROW   = "#2E2E2E"
 
 # Font sizes — equal to rendered pt sizes when figure included at \textwidth
-FS_HEADER  = 10.0
-FS_MSG     = 10.5
-FS_DESC    =  8.5
-FS_PHASE   =  9.5
-FS_DIAMOND =  9.0
-FS_TITLE   = 12.0
-FS_BRANCH  =  8.0
-FS_SMALL   =  7.5
+FS_HEADER  = 12.0
+FS_MSG     = 12.5
+FS_DESC    = 10.5
+FS_PHASE   = 11.5
+FS_DIAMOND = 11.0
+FS_TITLE   = 14.0
+FS_BRANCH  = 10.0
+FS_SMALL   =  9.5
 
 # ── Canvas ────────────────────────────────────────────────────────────────────
 FIG_W, FIG_H = 7.0, 7.4
@@ -65,12 +65,13 @@ HDR_H   = 0.50
 HDR_BOT = FIG_H - 0.70 - HDR_H   # = 6.20
 
 # ── Row layout (computed bottom-up for guaranteed clearance) ─────────────────
-# ROW=0.50: at FS_MSG=10.5pt (h≈0.146in) and FS_DESC=8.5pt (h≈0.118in) with
-# offsets ±0.075, clearance between adjacent rows ≈ 0.086 in.
+# ROW=0.50: at FS_MSG=12.5pt (h≈0.174in) and FS_DESC=10.5pt (h≈0.146in) with
+# offsets ±0.075, clearance between adjacent rows ≈ 0.040 in (msg labels are
+# single x-height letters, so effective clearance is larger).
 ROW = 0.50
 
 FOOT_LINE = 0.28   # y of footnote separator
-FOOT_TEXT = 0.15   # y of footnote text
+FOOT_TEXT = 0.10   # y of footnote text (two lines, centered)
 LL_BOT    = 0.36   # lifelines end just above footnote area
 
 # Work bottom-up so nothing overflows
@@ -116,7 +117,7 @@ def activation_bar(y_top, y_bot):
                             facecolor=C_BG, zorder=3))
 
 
-def arrow(x1, x2, y, msg, desc=None):
+def arrow(x1, x2, y, msg, desc=None, msg_dx=0.0):
     """Horizontal arrow: bold msg above, italic desc below."""
     ax.plot([x1, x2], [y, y], color=C_ARROW, lw=0.85, zorder=4,
             solid_capstyle="butt")
@@ -124,7 +125,7 @@ def arrow(x1, x2, y, msg, desc=None):
                 arrowprops=dict(arrowstyle="-|>", lw=0.85,
                                 color=C_ARROW, mutation_scale=8), zorder=5)
     mx = (x1 + x2) / 2
-    ax.text(mx, y + 0.075, msg,
+    ax.text(mx + msg_dx, y + 0.075, msg,
             ha="center", va="bottom",
             fontsize=FS_MSG, fontweight="bold", color=C_TEXT, zorder=6)
     if desc:
@@ -138,8 +139,8 @@ def diamond(x, y, label):
     pts = [(x, y+hh), (x+hw, y), (x, y-hh), (x-hw, y)]
     ax.add_patch(Polygon(pts, closed=True, linewidth=0.9,
                          edgecolor=C_BORDER, facecolor=C_BG, zorder=5))
-    ax.text(x, y + hh + 0.055, label,
-            ha="center", va="bottom",
+    ax.text(x - hw - 0.06, y, label,
+            ha="right", va="center",
             fontsize=FS_DIAMOND, fontweight="bold", color=C_ACCENT, zorder=6)
 
 
@@ -180,7 +181,8 @@ activation_bar(y_top=y_u[0] + 0.16, y_bot=y_c5 - 0.14)
 # ── u phase ──────────────────────────────────────────────────────────────────
 phase_label(y_u[0] + 0.10, "User message  (u)")
 
-arrow(xF, xB, y_u[0], "u", "sends message")
+# msg_dx: clear the "User message  (u)" phase label to the left
+arrow(xF, xB, y_u[0], "u", "sends message", msg_dx=0.18)
 arrow(xB, xM, y_u[1], "u", "write to Conversations")
 arrow(xM, xD, y_u[2], "u", "change stream → Socket.io notify")
 arrow(xB, xL, y_u[3], "u", "forward conversation history")
@@ -191,7 +193,7 @@ arrow(xB, xF, y_u[5], "u", "confirmed")
 phase_divider_line(y_div)
 
 # ── c phase ──────────────────────────────────────────────────────────────────
-phase_label(y_c1 + 0.10, "Conversational agent response  (c)")
+phase_label(y_c1 + 0.03, "Conversational agent response  (c)")
 
 arrow(xL, xB, y_c1, "c", "response generated")
 arrow(xB, xM, y_c2, "c", "persist c + reviewer_flags")
@@ -219,7 +221,7 @@ ax.plot([xB + 0.22, no_stub_x], [y_dia, y_dia],
 ax.annotate("", xy=(no_stub_x, y_dia), xytext=(no_stub_x - 0.01, y_dia),
             arrowprops=dict(arrowstyle="-|>", lw=0.75,
                             color=C_MUTED, mutation_scale=6), zorder=4)
-ax.text((xB + 0.22 + no_stub_x)/2, y_dia + 0.075, "no → flag for review",
+ax.text((xB + 0.22 + no_stub_x)/2, y_dia + 0.03, "no → flag for review",
         ha="center", va="bottom",
         fontsize=FS_BRANCH, color=C_MUTED, style="italic")
 
@@ -235,11 +237,11 @@ ax.text(bx + tick + 0.05, (b_top + b_bot)/2,
         ha="left", va="center",
         fontsize=FS_SMALL, color=C_MUTED, style="italic")
 
-# ── footnote (single line, safely below activation bar) ───────────────────────
+# ── footnote (two lines so it stays narrower than the diagram) ────────────────
 ax.plot([LM, RM], [FOOT_LINE, FOOT_LINE], color="#DDDDDD", lw=0.5)
 ax.text(FIG_W/2, FOOT_TEXT,
-        "Monitoring Dashboard: hpms-dashboard (Express + Socket.io + React 18)"
-        "  |  reviewer_flags: LlamaGuard-4-12B / omni-moderation-2024-09-26",
+        "Monitoring Dashboard: hpms-dashboard (Express + Socket.io + React 18)\n"
+        "reviewer_flags: LlamaGuard-4-12B / omni-moderation-2024-09-26",
         ha="center", va="center",
         fontsize=FS_SMALL, color=C_MUTED, style="italic")
 
