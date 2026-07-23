@@ -15,7 +15,7 @@ inputs:
     description: Registry namespace/prefix
     required: true
   branch:
-    description: Git branch name (dev or main)
+    description: Git branch name (dev, main, or elderbot-msw-2026)
     required: true
   sha:
     description: Git commit SHA
@@ -57,15 +57,23 @@ runs:
         esac
 
         case "$branch" in
-          dev|main)
+          dev|main|elderbot-msw-2026)
             ;;
           *)
-            echo "Unsupported branch: ${branch}. Expected dev or main." >&2
+            echo "Unsupported branch: ${branch}. Expected dev, main, or elderbot-msw-2026." >&2
             exit 1
             ;;
         esac
 
-        app_name="${{ inputs.app-name-prefix }}-${service}-${branch}"
+        # Compose a stable Helm release + image name.
+        #
+        # For the MSW branch we use a stable "-msw" suffix so the release name
+        # does not redundantly include the branch twice (e.g. APP_NAME_MSW=elderbot-msw-2026).
+        if [[ "$branch" == "elderbot-msw-2026" ]]; then
+          app_name="hpms-watcher-${{ inputs.app-name-prefix }}-msw"
+        else
+          app_name="hpms-watcher-${{ inputs.app-name-prefix }}-${branch}"
+        fi
         image_name="${app_name}"
         image_tag="${sha::7}"
         full_image="${{ inputs.registry }}/${{ inputs.docker-registry-prefix }}/${image_name}:${image_tag}"

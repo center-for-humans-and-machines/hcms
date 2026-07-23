@@ -7,30 +7,29 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
-from datetime import datetime
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Iterable
 
-from bson import ObjectId
 import pytest
-from pydantic import ValidationError
-
-from hpms.database.models import ConversationDocument
-from hpms.database.repository import (
+from bson import ObjectId
+from hcms.database.models import ConversationDocument
+from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
     MessageBackfillTarget,
     MongoConversationRepository,
 )
-from hpms.monitoring.realtime_watcher import (
+from hcms.monitoring.realtime_watcher import (
     RealtimeConversationWatcher,
     normalize_llama_guard_categories,
     normalize_openai_categories,
 )
+from pydantic import ValidationError
 
 
 @dataclass
@@ -765,7 +764,7 @@ def test_failure_is_retried_on_later_attempt():
 
 def test_compute_reconnect_sleep_seconds_grows_and_caps(monkeypatch):
     monkeypatch.setattr(
-        "hpms.monitoring.realtime_watcher.random.uniform", lambda *_: 0.0
+        "hcms.monitoring.realtime_watcher.random.uniform", lambda *_: 0.0
     )
 
     watcher = RealtimeConversationWatcher(
@@ -785,7 +784,7 @@ def test_compute_reconnect_sleep_seconds_grows_and_caps(monkeypatch):
 
 def test_compute_reconnect_sleep_seconds_large_failure_number_is_capped(monkeypatch):
     monkeypatch.setattr(
-        "hpms.monitoring.realtime_watcher.random.uniform", lambda *_: 0.0
+        "hcms.monitoring.realtime_watcher.random.uniform", lambda *_: 0.0
     )
 
     watcher = RealtimeConversationWatcher(
@@ -807,9 +806,9 @@ def test_monitoring_package_import_does_not_require_moderation_credentials():
     env.pop("LLAMA_GUARD_ENDPOINT", None)
 
     command = (
-        "import hpms.monitoring\n"
-        "assert hasattr(hpms.monitoring, 'RateMessagesProcessor')\n"
-        "from hpms.monitoring import RealtimeConversationWatcher\n"
+        "import hcms.monitoring\n"
+        "assert hasattr(hcms.monitoring, 'RateMessagesProcessor')\n"
+        "from hcms.monitoring import RealtimeConversationWatcher\n"
         "assert RealtimeConversationWatcher.__name__ == 'RealtimeConversationWatcher'\n"
         "print('ok')\n"
     )
@@ -837,7 +836,7 @@ def test_run_reconnects_after_stream_failure(monkeypatch):
         reconnect_backoff_jitter_seconds=0.0,
     )
 
-    monkeypatch.setattr("hpms.monitoring.realtime_watcher.time.sleep", sleeps.append)
+    monkeypatch.setattr("hcms.monitoring.realtime_watcher.time.sleep", sleeps.append)
 
     with pytest.raises(KeyboardInterrupt):
         watcher.run()
