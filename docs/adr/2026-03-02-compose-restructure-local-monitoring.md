@@ -13,7 +13,7 @@ The repository used a single `compose.yaml` file that defined only the
 
 1. The default Compose filename implied it was the general project stack, but it
    was only for linting.
-2. The new MongoDB watcher runtime for BAN-24 needs a dedicated local stack
+2. The new MongoDB watcher runtime needs a dedicated local stack
    including MongoDB replica set initialization and the HCMS watcher process.
 
 ## Decision
