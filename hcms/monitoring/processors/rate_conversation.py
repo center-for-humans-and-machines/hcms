@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-from hcms.loading import (RATE_CONVERSATIONS_PROMPT_PATH,
-                          RATE_MESSAGES_PROMPT_PATH)
-from hcms.loading.data_loading import (load_conversation_dataset,
-                                       load_message_dataset)
+from hcms.loading import RATE_CONVERSATIONS_PROMPT_PATH, RATE_MESSAGES_PROMPT_PATH
+from hcms.loading.data_loading import load_conversation_dataset, load_message_dataset
 from hcms.monitoring.api import BatchConfig
 from hcms.monitoring.models import BotRatingResponse
 from hcms.monitoring.processors.base import BaseProcessor
