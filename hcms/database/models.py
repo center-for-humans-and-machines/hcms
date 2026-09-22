@@ -97,6 +97,7 @@ class MessageDocument(_NonBlankOptionalFieldMixin, BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(..., min_length=1)
+    audio_url: str | None = None
     role: str = Field(..., min_length=1)
     timestamp: datetime
     type: str = Field(..., min_length=1)
