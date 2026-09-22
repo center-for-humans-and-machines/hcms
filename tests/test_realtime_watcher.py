@@ -266,6 +266,14 @@ def test_normalize_llama_guard_categories_handles_safe_known_and_unknown():
     assert categories == []
     assert other == ""
 
+    categories, other = normalize_llama_guard_categories("safe")
+    assert categories == []
+    assert other == ""
+
+    categories, other = normalize_llama_guard_categories("Safe")
+    assert categories == []
+    assert other == ""
+
     categories, other = normalize_llama_guard_categories("Hate")
     assert categories == ["Hate"]
     assert other == ""

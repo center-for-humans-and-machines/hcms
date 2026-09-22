@@ -82,7 +82,7 @@ def normalize_llama_guard_categories(raw_result: Any) -> tuple[list[str], str]:
         return [], str(raw_result)
 
     result = raw_result.strip()
-    if result in {"", "0"}:
+    if result in {"", "0"} or result.lower() == "safe":
         return [], ""
 
     if result in KNOWN_LLAMA_GUARD_CATEGORIES:
