@@ -1,6 +1,6 @@
-"""Unit tests for hpms.utils.text module."""
+"""Unit tests for hcms.utils.text module."""
 
-from hpms.utils import clean_text
+from hcms.utils import clean_text
 
 
 class TestCleanText:

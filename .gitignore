@@ -7,6 +7,7 @@ data/batch
 notebooks/*.html
 notebooks/*.out.ipynb
 *.png
+.claude/worktrees
 
 # Pytest
 .test_report.xml

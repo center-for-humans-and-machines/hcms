@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-- `hpms/`: main Python package. Key domains include `loading/`, `monitoring/`, `evaluation/`, `rating/`, `plot/`, and shared helpers in `utils/`.
+- `hcms/`: main Python package. Key domains include `loading/`, `monitoring/`, `evaluation/`, `rating/`, `plot/`, and shared helpers in `utils/`.
 - `tests/`: pytest suite (`test_*.py`), including `tests/test_regression.py` for model-output regression checks.
 - `script/`: project entrypoints for setup, linting, and testing (`bootstrap`, `install`, `lint`, `test`).
 - `data/`: datasets and paper artifacts (`data/paper/`, `data/dataset/`).

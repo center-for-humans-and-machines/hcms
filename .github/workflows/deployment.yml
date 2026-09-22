@@ -2,7 +2,7 @@ name: Deployment
 
 on:
   push:
-    branches: [dev, main]
+    branches: [dev, main, elderbot-msw-2026]
   workflow_dispatch:
 
 permissions:
@@ -33,12 +33,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Validate MSW app name variable
+        if: github.ref_name == 'elderbot-msw-2026'
+        shell: bash
+        run: |
+          [[ -n "${{ vars.APP_NAME_MSW }}" ]] || {
+            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
+            exit 1
+          }
+
       - name: Resolve service variables
         id: vars
         uses: ./.github/actions/resolve-service-vars
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ vars.APP_NAME }}
+          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
@@ -117,12 +126,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Validate MSW app name variable
+        if: github.ref_name == 'elderbot-msw-2026'
+        shell: bash
+        run: |
+          [[ -n "${{ vars.APP_NAME_MSW }}" ]] || {
+            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
+            exit 1
+          }
+
       - name: Resolve service variables
         id: vars
         uses: ./.github/actions/resolve-service-vars
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ vars.APP_NAME }}
+          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
@@ -142,8 +160,10 @@ jobs:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           MONGODB_URI_DEV: ${{ secrets.MONGODB_URI_DEV }}
           MONGODB_URI_MAIN: ${{ secrets.MONGODB_URI_MAIN }}
+          MONGODB_URI_MSW: ${{ secrets.MONGODB_URI_MSW }}
           MONGODB_DATABASE_DEV: ${{ vars.MONGODB_DATABASE_DEV }}
           MONGODB_DATABASE_MAIN: ${{ vars.MONGODB_DATABASE_MAIN }}
+          MONGODB_DATABASE_MSW: ${{ vars.MONGODB_DATABASE_MSW }}
           OPENAI_MODERATION_API_KEY: ${{ secrets.OPENAI_MODERATION_API_KEY }}
           LLAMA_GUARD_API_KEY: ${{ secrets.LLAMA_GUARD_API_KEY }}
           LLAMA_GUARD_ENDPOINT: ${{ vars.LLAMA_GUARD_ENDPOINT }}
@@ -155,7 +175,7 @@ jobs:
           MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_BASE_SECONDS || '1' }}
           MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_MAX_SECONDS || '30' }}
           MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS || '0.25' }}
-          HPMS_LOG_LEVEL: ${{ vars.HPMS_LOG_LEVEL || 'INFO' }}
+          HCMS_LOG_LEVEL: ${{ vars.HCMS_LOG_LEVEL || 'INFO' }}
         run: |
           set -euo pipefail
 
@@ -168,6 +188,10 @@ jobs:
             main)
               mongodb_uri="$MONGODB_URI_MAIN"
               mongodb_database="$MONGODB_DATABASE_MAIN"
+              ;;
+            elderbot-msw-2026)
+              mongodb_uri="$MONGODB_URI_MSW"
+              mongodb_database="$MONGODB_DATABASE_MSW"
               ;;
             *)
               echo "Unsupported branch: ${branch}" >&2
@@ -248,7 +272,7 @@ jobs:
             MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: "$MONGODB_RECONNECT_BACKOFF_BASE_SECONDS"
             MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: "$MONGODB_RECONNECT_BACKOFF_MAX_SECONDS"
             MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "$MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS"
-            HPMS_LOG_LEVEL: "$HPMS_LOG_LEVEL"
+            HCMS_LOG_LEVEL: "$HCMS_LOG_LEVEL"
             OPENAI_MODERATION_API_KEY: "$OPENAI_MODERATION_API_KEY"
             LLAMA_GUARD_API_KEY: "$LLAMA_GUARD_API_KEY"
             LLAMA_GUARD_ENDPOINT: "$LLAMA_GUARD_ENDPOINT"
