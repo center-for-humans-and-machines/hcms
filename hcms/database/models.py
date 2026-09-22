@@ -201,10 +201,13 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
     id: ObjectId = Field(..., alias="_id")
     conversation_id: str = Field(..., min_length=1)
     participant_id: str | None = Field(...)
+    participant_doc_id: str | None = None
     model: str = Field(..., min_length=1)
     experiment_id: str = Field(..., min_length=1)
     project_id: str = Field(..., min_length=1)
     created_at: datetime
+    last_message_sent_time: datetime | None = None
+    closed: bool | None = None
     custom_system_message_id: str | None
     multi_rounds: bool
     messages: list[MessageDocument]
