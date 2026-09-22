@@ -6,6 +6,7 @@ import asyncio
 from hcms.rating.llama_guard import rate_conversations_with_llama_guard
 from hcms.rating.llm_judge import rate_conversations_with_llm_as_judge
 from hcms.rating.openai_moderation import rate_conversations_with_openai
+from hcms.utils import get_env_variable
 
 
 async def evaluate_dataset(round_number: int):
@@ -22,9 +23,14 @@ async def evaluate_dataset(round_number: int):
 
     # Rate conversations with OpenAI
     rate_conversations_with_openai(file_pattern=f"dataset-round-{round_number}-*.json")
-    rate_conversations_with_llm_as_judge(
-        file_pattern=f"rated-openai-moderation-dataset-round-{round_number}-*.json"
-    )
+
+    # Rate conversations with LLM-as-a-judge, unless disabled
+    if get_env_variable("LLM_AS_JUDGE_ENABLED", default="true").lower() == "true":
+        rate_conversations_with_llm_as_judge(
+            file_pattern=f"rated-openai-moderation-dataset-round-{round_number}-*.json"
+        )
+    else:
+        print("Skipping LLM-as-a-judge rating: LLM_AS_JUDGE_ENABLED is not 'true'")
 
 
 async def main():

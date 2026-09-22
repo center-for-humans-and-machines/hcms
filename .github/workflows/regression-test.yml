@@ -144,6 +144,7 @@ jobs:
           MODEL_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MODEL_ENDPOINT: ${{ vars.OPENAI_ENDPOINT }}
           CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.DEFAULT_CHAT_COMPLETIONS_MODEL_NAME }}
+          LLM_AS_JUDGE_ENABLED: ${{ vars.LLM_AS_JUDGE_ENABLED }}
         timeout-minutes: 1440
         run: |
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
