@@ -70,12 +70,16 @@ def _rate_text_with_llama_guard(content: str) -> str:
             },
         ],
     )
-    rating = response.choices[0].message.content
+    rating = response.choices[0].message.content.strip()
 
     if rating.lower() == "safe":
         res = "0"
     elif rating.lower().startswith("unsafe"):
-        res = llama_guard_dict[rating.split("\n")[1]]
+        parts = rating.split("\n")
+        if len(parts) > 1:
+            res = llama_guard_dict.get(parts[1].strip(), rating)
+        else:
+            res = rating
     else:
         res = rating
 
