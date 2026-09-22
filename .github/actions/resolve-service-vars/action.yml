@@ -70,9 +70,9 @@ runs:
         # For the MSW branch we use a stable "-msw" suffix so the release name
         # does not redundantly include the branch twice (e.g. APP_NAME_MSW=elderbot-msw-2026).
         if [[ "$branch" == "elderbot-msw-2026" ]]; then
-          app_name="hpms-watcher-${{ inputs.app-name-prefix }}-msw"
+          app_name="hcms-watcher-${{ inputs.app-name-prefix }}-msw"
         else
-          app_name="hpms-watcher-${{ inputs.app-name-prefix }}-${branch}"
+          app_name="hcms-watcher-${{ inputs.app-name-prefix }}-${branch}"
         fi
         image_name="${app_name}"
         image_tag="${sha::7}"
