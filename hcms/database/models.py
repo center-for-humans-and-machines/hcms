@@ -67,6 +67,17 @@ class UserFlagDocument(BaseModel):
     category_other: str
     reviews: list[UserFlagReviewDocument]
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_fields(cls, value: object) -> object:
+        """Reject legacy fields explicitly."""
+        if isinstance(value, dict):
+            if "created_at" in value:
+                raise ValueError("Legacy field 'created_at' is not permitted")
+            if "created_by" in value:
+                raise ValueError("Legacy field 'created_by' is not permitted")
+        return value
+
 
 class ReviewerFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Reviewer-created flag on a single message."""
@@ -224,5 +235,14 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
         if isinstance(value, str) and not value.strip():
             return None
         return value
-        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_fields(cls, value: object) -> object:
+        """Reject legacy fields explicitly."""
+        if isinstance(value, dict):
+            if "reviewed_by" in value:
+                raise ValueError("Legacy field 'reviewed_by' is not permitted")
+            if "assigned_to" in value:
+                raise ValueError("Legacy field 'assigned_to' is not permitted")
         return value
