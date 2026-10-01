@@ -73,7 +73,7 @@ def _rate_text_with_llama_guard(content: str) -> str:
     rating = response.choices[0].message.content.strip()
 
     if rating.lower() == "safe":
-        res = "0"
+        res = ""
     elif rating.lower().startswith("unsafe"):
         parts = rating.split("\n")
         if len(parts) > 1:
