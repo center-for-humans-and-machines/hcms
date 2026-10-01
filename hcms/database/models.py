@@ -49,7 +49,7 @@ class _NonBlankOptionalFieldMixin:
 class UserFlagReviewDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Review of a participant flag by a human reviewer."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     reviewer_username: str = Field(..., min_length=1)
@@ -61,7 +61,7 @@ class UserFlagReviewDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class UserFlagDocument(BaseModel):
     """Participant-created flag on a single message."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     category: str
     category_other: str
@@ -71,7 +71,7 @@ class UserFlagDocument(BaseModel):
 class ReviewerFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Reviewer-created flag on a single message."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     reviewer_by_username: str = Field(..., min_length=1)
@@ -84,7 +84,7 @@ class ReviewerFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class DuplicateFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Duplicate flag metadata for a single message."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     reviewer_username: str = Field(..., min_length=1)
@@ -94,7 +94,7 @@ class DuplicateFlagDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class MessageDocument(_NonBlankOptionalFieldMixin, BaseModel):
     """Message document embedded in a conversation."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     content: str = Field(..., min_length=1)
     audio_url: str | None = None
@@ -124,7 +124,7 @@ class MessageDocument(_NonBlankOptionalFieldMixin, BaseModel):
 class OpenedByDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Reviewer open-state entry."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     opened_at: datetime
@@ -133,7 +133,7 @@ class OpenedByDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class ReviewedMessageDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Reviewer reviewed-state entry for a specific message."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     message_index: int = Field(..., ge=0)
@@ -143,7 +143,7 @@ class ReviewedMessageDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class AssignedMessageDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Assignment metadata for a reviewer and message."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     message_index: int = Field(..., ge=0)
@@ -156,7 +156,7 @@ class AssignedMessageDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class NaturalnessRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Human evaluation rating for conversational naturalness."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     rated_at: datetime
@@ -182,7 +182,7 @@ class NaturalnessRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
 class RealismRatingDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """Human evaluation rating for conversational realism."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reviewer_id: str = Field(..., min_length=1)
     rated_at: datetime
@@ -193,7 +193,7 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
     """MongoDB conversation document matching the dashboard schema."""
 
     model_config = ConfigDict(
-        extra="forbid",
+        extra="ignore",
         populate_by_name=True,
         arbitrary_types_allowed=True,
     )
