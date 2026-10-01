@@ -4,31 +4,30 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
-from typing import Any
 import uuid
+from datetime import datetime, timezone
+from typing import Any
 
-from bson import ObjectId
 import pytest
-
-from hpms.database.repository import (
+from bson import ObjectId
+from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
     MongoConversationRepository,
 )
-from hpms.monitoring.realtime_watcher import RealtimeConversationWatcher
+from hcms.monitoring.realtime_watcher import RealtimeConversationWatcher
 
 try:
     from pymongo import MongoClient as PYMONGO_CLIENT
 except ModuleNotFoundError:  # pragma: no cover - optional local dependency
     PYMONGO_CLIENT = None
 
-MONGO_URI = os.getenv("HPMS_INTEGRATION_MONGODB_URI")
+MONGO_URI = os.getenv("HCMS_INTEGRATION_MONGODB_URI")
 pytestmark = [
     pytest.mark.skipif(
         not MONGO_URI,
-        reason="Set HPMS_INTEGRATION_MONGODB_URI to run Mongo integration tests.",
+        reason="Set HCMS_INTEGRATION_MONGODB_URI to run Mongo integration tests.",
     ),
     pytest.mark.skipif(
         PYMONGO_CLIENT is None,
@@ -83,7 +82,7 @@ def collection():
     """Provide isolated real Mongo collection for each integration test."""
     assert PYMONGO_CLIENT is not None
     client = PYMONGO_CLIENT(MONGO_URI, serverSelectionTimeoutMS=5000)
-    database_name = f"hpms_integration_{uuid.uuid4().hex}"
+    database_name = f"hcms_integration_{uuid.uuid4().hex}"
     db = client[database_name]
     conversations = db["Conversations"]
     yield conversations
