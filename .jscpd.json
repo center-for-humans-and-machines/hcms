@@ -5,7 +5,8 @@
     "**/__snapshots__/**",
     "**/node_modules/**",
     "**/_site/**",
-    "**/.quarto/**"
+    "**/.quarto/**",
+    "**/.github/**"
   ],
   "absolute": true
 }
