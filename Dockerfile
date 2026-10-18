@@ -28,11 +28,12 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+# Keep the Python version in this path in sync with the FROM tags above
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 
 COPY . .
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import hcms.database.models, pymongo, pydantic" || exit 1
+  CMD ["python", "-c", "import hcms.database.models, pymongo, pydantic"]
 
 CMD ["python", "-m", "hcms.monitoring.watch_mongo_conversations"]
