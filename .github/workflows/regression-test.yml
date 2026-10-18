@@ -7,6 +7,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 env:
   BATCH_PROVIDER: openai
   BATCH_MODEL_NAME: ${{ vars.BATCH_MODEL_NAME }}
@@ -25,6 +27,8 @@ env:
 jobs:
   gen-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -34,31 +38,17 @@ jobs:
           - gpt-5.3-chat-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Python 3.14
-        uses: actions/setup-python@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.14"
+          persist-credentials: false
 
-      - name: Install poetry
-        run: |
-          python -m pip install poetry==2.1.2
-
-      - name: Configure poetry
-        run: |
-          python -m poetry config virtualenvs.in-project true
-
-      - name: Set up cache
-        uses: actions/cache@v6
-        id: cached-poetry-dependencies
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.14-${{ hashFiles('**/poetry.lock') }}-self-hosted
+      - name: Set up Poetry
+        id: setup-poetry
+        uses: ./.github/actions/setup-poetry # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
 
       - name: Install dependencies
         run: poetry install
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        if: steps.setup-poetry.outputs.cache-hit != 'true'
 
       - name: Generate dataset
         env:
@@ -69,67 +59,62 @@ jobs:
           poetry run python generate_dataset.py --round-number=${{ matrix.round_number }} --tag=regression-pipeline
 
       - name: Archive data generation results to GitHub
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reg-test-gen-round-${{ matrix.round_number }}-${{ matrix.chat_model }}-${{ github.run_id }}
           path: |
             data/dataset/*.json
 
       - name: Setup Google Drive credentials
-        uses: ./.github/actions/setup-gdrive
+        uses: ./.github/actions/setup-gdrive # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
       - name: Upload data generation results to Google Drive
+        env:
+          GOOGLE_DRIVE_SHARED_DRIVE_ID: ${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
         run: |
-          poetry run python upload_to_gdrive.py "data/dataset/*.json" --target-path=dataset --drive-id=${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
+          poetry run python upload_to_gdrive.py "data/dataset/*.json" --target-path=dataset --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
 
       - name: Dataset Generation Summary
+        env:
+          ROUND_NUMBER: ${{ matrix.round_number }}
+          CHAT_MODEL: ${{ matrix.chat_model }}
         run: |
-          echo "## Dataset Generation Results - Round ${{ matrix.round_number }} - ${{ matrix.chat_model }}" >> $GITHUB_STEP_SUMMARY
-          echo "Generated datasets:" >> $GITHUB_STEP_SUMMARY
-          ls -la data/dataset/*.json | while read line; do
-            echo "- $line" >> $GITHUB_STEP_SUMMARY
-          done
-          echo "Dataset count: $(ls -1 data/dataset/*.json | wc -l)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Dataset Generation Results - Round ${ROUND_NUMBER} - ${CHAT_MODEL}"
+            echo "Generated datasets:"
+            find data/dataset -maxdepth 1 -name "*.json" -exec ls -la {} + | while read -r line; do
+              echo "- $line"
+            done
+            echo "Dataset count: $(find data/dataset -maxdepth 1 -name "*.json" | wc -l)"
+          } >> "$GITHUB_STEP_SUMMARY"
         if: ${{ !cancelled() }}
 
   eval-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: gen-data
     strategy:
       matrix:
         round_number: [2, 3]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Python 3.14
-        uses: actions/setup-python@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.14"
+          persist-credentials: false
 
-      - name: Install poetry
-        run: |
-          python -m pip install poetry==2.1.2
-
-      - name: Configure poetry
-        run: |
-          python -m poetry config virtualenvs.in-project true
-
-      - name: Set up cache
-        uses: actions/cache@v6
-        id: cached-poetry-dependencies
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.14-${{ hashFiles('**/poetry.lock') }}-self-hosted
+      - name: Set up Poetry
+        id: setup-poetry
+        uses: ./.github/actions/setup-poetry # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
 
       - name: Install dependencies
         run: poetry install
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        if: steps.setup-poetry.outputs.cache-hit != 'true'
 
       - name: Download artifacts for current round
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: reg-test-gen-round-${{ matrix.round_number }}-*-${{ github.run_id }}
           merge-multiple: true
@@ -150,7 +135,7 @@ jobs:
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
       - name: Archive data evaluation results to GitHub
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reg-test-eval-round-${{ matrix.round_number }}-${{ github.run_id }}
           path: |
@@ -158,25 +143,31 @@ jobs:
             data/dataset/rated-*
 
       - name: Setup Google Drive credentials
-        uses: ./.github/actions/setup-gdrive
+        uses: ./.github/actions/setup-gdrive # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
       - name: Upload evaluation results to Google Drive
+        env:
+          GOOGLE_DRIVE_SHARED_DRIVE_ID: ${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
         run: |
-          poetry run python upload_to_gdrive.py "data/dataset/rated-*" --target-path=ratings --drive-id=${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
-          poetry run python upload_to_gdrive.py "data/batch/*" --target-path=batch --drive-id=${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
+          poetry run python upload_to_gdrive.py "data/dataset/rated-*" --target-path=ratings --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
+          poetry run python upload_to_gdrive.py "data/batch/*" --target-path=batch --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
 
       - name: Evaluation Summary
+        env:
+          ROUND_NUMBER: ${{ matrix.round_number }}
         run: |
-          echo "## Evaluation Results - Round ${{ matrix.round_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "Batch files:" >> $GITHUB_STEP_SUMMARY
-          find data/batch -name "*.json" -o -name "*.jsonl" 2>/dev/null | while read file; do
-            echo "- $file ($(wc -l < "$file" 2>/dev/null || echo "0") lines)" >> $GITHUB_STEP_SUMMARY
-          done || echo "No batch files found" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Rated datasets:" >> $GITHUB_STEP_SUMMARY
-          ls data/dataset/rated-*.json 2>/dev/null | while read file; do
-            echo "- $file" >> $GITHUB_STEP_SUMMARY
-          done || echo "No rated datasets found" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Evaluation Results - Round ${ROUND_NUMBER}"
+            echo "Batch files:"
+            find data/batch -name "*.json" -o -name "*.jsonl" 2>/dev/null | while read -r file; do
+              echo "- $file ($(wc -l < "$file" 2>/dev/null || echo "0") lines)"
+            done || echo "No batch files found"
+            echo ""
+            echo "Rated datasets:"
+            find data/dataset -maxdepth 1 -name "rated-*.json" 2>/dev/null | sort | while read -r file; do
+              echo "- $file"
+            done || echo "No rated datasets found"
+          } >> "$GITHUB_STEP_SUMMARY"
         if: ${{ !cancelled() }}

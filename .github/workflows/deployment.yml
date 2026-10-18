@@ -31,41 +31,35 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Validate MSW app name variable
-        if: github.ref_name == 'elderbot-msw-2026'
-        shell: bash
-        run: |
-          [[ -n "${{ vars.APP_NAME_MSW }}" ]] || {
-            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
-            exit 1
-          }
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Resolve service variables
         id: vars
-        uses: ./.github/actions/resolve-service-vars
+        uses: ./.github/actions/resolve-service-vars # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
+          app-name-prefix: ${{ vars.APP_NAME }}
+          msw-app-name-prefix: ${{ vars.APP_NAME_MSW }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
           sha: ${{ github.sha }}
 
       - name: Login to Docker Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.GITLAB_REGISTRY_USERNAME }}
           password: ${{ secrets.GITLAB_REGISTRY_PASSWORD }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build and push Docker image
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.build_context }}
           file: ${{ matrix.dockerfile }}
@@ -103,7 +97,7 @@ jobs:
 
       - name: Upload build metadata
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-meta-${{ matrix.service }}
           path: build-meta/${{ matrix.service }}.env
@@ -124,23 +118,17 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Validate MSW app name variable
-        if: github.ref_name == 'elderbot-msw-2026'
-        shell: bash
-        run: |
-          [[ -n "${{ vars.APP_NAME_MSW }}" ]] || {
-            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
-            exit 1
-          }
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Resolve service variables
         id: vars
-        uses: ./.github/actions/resolve-service-vars
+        uses: ./.github/actions/resolve-service-vars # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
+          app-name-prefix: ${{ vars.APP_NAME }}
+          msw-app-name-prefix: ${{ vars.APP_NAME_MSW }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
@@ -280,7 +268,7 @@ jobs:
 
       - name: Deploy with Helm
         id: deploy
-        uses: ./.github/actions/deploy-helm
+        uses: ./.github/actions/deploy-helm # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           app-name: ${{ steps.vars.outputs.app_name }}
           image-name: ${{ steps.vars.outputs.full_image }}
@@ -334,7 +322,7 @@ jobs:
 
       - name: Upload deploy metadata
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: deploy-meta-${{ matrix.service }}
           path: deploy-meta/${{ matrix.service }}.env
@@ -348,7 +336,7 @@ jobs:
 
     steps:
       - name: Download build metadata
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: build-meta-*
@@ -356,7 +344,7 @@ jobs:
           merge-multiple: true
 
       - name: Download deployment metadata
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: deploy-meta-*

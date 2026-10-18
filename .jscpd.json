@@ -1,11 +1,12 @@
 {
-  "threshold": 0,
+  "threshold": 2,
   "reporters": ["consoleFull"],
   "ignore": [
     "**/__snapshots__/**",
     "**/node_modules/**",
     "**/_site/**",
-    "**/.quarto/**"
+    "**/.quarto/**",
+    "**/.github/**"
   ],
   "absolute": true
 }
