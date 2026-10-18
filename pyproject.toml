@@ -24,7 +24,7 @@ google-auth-oauthlib = "^1.2.2"
 [tool.poetry.group.dev.dependencies]
 jupyter = "^1.1.1"
 notebook = "^7.2.2"
-ipykernel = "^6.29.5"
+ipykernel = ">=6.29.5,<8.0.0"
 matplotlib = "^3.9.3"
 polars = "^2.0.0"
 seaborn = "^0.13.2"
