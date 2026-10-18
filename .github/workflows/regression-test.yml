@@ -81,8 +81,10 @@ jobs:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
       - name: Upload data generation results to Google Drive
+        env:
+          GOOGLE_DRIVE_SHARED_DRIVE_ID: ${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
         run: |
-          poetry run python upload_to_gdrive.py "data/dataset/*.json" --target-path=dataset --drive-id=${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
+          poetry run python upload_to_gdrive.py "data/dataset/*.json" --target-path=dataset --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
 
       - name: Dataset Generation Summary
         run: |
@@ -163,9 +165,11 @@ jobs:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
       - name: Upload evaluation results to Google Drive
+        env:
+          GOOGLE_DRIVE_SHARED_DRIVE_ID: ${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
         run: |
-          poetry run python upload_to_gdrive.py "data/dataset/rated-*" --target-path=ratings --drive-id=${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
-          poetry run python upload_to_gdrive.py "data/batch/*" --target-path=batch --drive-id=${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
+          poetry run python upload_to_gdrive.py "data/dataset/rated-*" --target-path=ratings --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
+          poetry run python upload_to_gdrive.py "data/batch/*" --target-path=batch --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
 
       - name: Evaluation Summary
         run: |

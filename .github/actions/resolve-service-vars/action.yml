@@ -40,12 +40,19 @@ runs:
   steps:
     - id: resolve
       shell: bash
+      env:
+        SERVICE: ${{ inputs.service }}
+        APP_NAME_PREFIX: ${{ inputs.app-name-prefix }}
+        REGISTRY: ${{ inputs.registry }}
+        DOCKER_REGISTRY_PREFIX: ${{ inputs.docker-registry-prefix }}
+        BRANCH: ${{ inputs.branch }}
+        SHA: ${{ inputs.sha }}
       run: |
         set -euo pipefail
 
-        service="${{ inputs.service }}"
-        branch="${{ inputs.branch }}"
-        sha="${{ inputs.sha }}"
+        service="${SERVICE}"
+        branch="${BRANCH}"
+        sha="${SHA}"
 
         case "$service" in
           watcher)
@@ -70,13 +77,13 @@ runs:
         # For the MSW branch we use a stable "-msw" suffix so the release name
         # does not redundantly include the branch twice (e.g. APP_NAME_MSW=elderbot-msw-2026).
         if [[ "$branch" == "elderbot-msw-2026" ]]; then
-          app_name="hcms-watcher-${{ inputs.app-name-prefix }}-msw"
+          app_name="hcms-watcher-${APP_NAME_PREFIX}-msw"
         else
-          app_name="hcms-watcher-${{ inputs.app-name-prefix }}-${branch}"
+          app_name="hcms-watcher-${APP_NAME_PREFIX}-${branch}"
         fi
         image_name="${app_name}"
         image_tag="${sha::7}"
-        full_image="${{ inputs.registry }}/${{ inputs.docker-registry-prefix }}/${image_name}:${image_tag}"
+        full_image="${REGISTRY}/${DOCKER_REGISTRY_PREFIX}/${image_name}:${image_tag}"
 
         {
           echo "app_name=${app_name}"
