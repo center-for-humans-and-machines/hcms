@@ -17,6 +17,8 @@ from typing import Any, Iterable
 
 import pytest
 from bson import ObjectId
+from pydantic import ValidationError
+
 from hcms.database.models import ConversationDocument
 from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
@@ -29,7 +31,6 @@ from hcms.monitoring.realtime_watcher import (
     normalize_llama_guard_categories,
     normalize_openai_categories,
 )
-from pydantic import ValidationError
 
 
 @dataclass

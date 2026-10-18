@@ -4,11 +4,11 @@ over multiple days."""
 import ast
 import json
 import re
+import subprocess
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-import subprocess
-import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -34,13 +34,13 @@ from hcms.evaluation.reg_test_categories_plots import (
     LLAMA_GUARD_CATEGORIES,
     plot_flags_by_turn_separate_legends_stacked,
 )
+from hcms.evaluation.reg_test_categories_table import (
+    generate_flag_categories_latex_table,
+)
 from hcms.evaluation.reg_test_moderation_agreement import (
     compute_moderation_agreement,
     plot_moderation_agreement,
     print_agreement_summary,
-)
-from hcms.evaluation.reg_test_categories_table import (
-    generate_flag_categories_latex_table,
 )
 from hcms.evaluation.reg_test_table import generate_latex_table, load_json_data
 from hcms.evaluation.self_bleu import (
@@ -50,10 +50,10 @@ from hcms.evaluation.self_bleu import (
 from hcms.evaluation.unique_n_grams import percent_unique_ngrams
 from hcms.evaluation.zipf import calculate_zipf_coefficient
 from hcms.plot.config import (
+    _RESOLVED,
     PlotConfig,
     _get_base_theme_elements,
     _get_text_element,
-    _RESOLVED,
 )
 
 

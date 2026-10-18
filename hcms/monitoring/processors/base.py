@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
 import polars as pl
+from pydantic import BaseModel
+
 from hcms.constants import CONTENT, ROLE, SYSTEM, USER
 from hcms.monitoring.api import BatchConfig
 from hcms.monitoring.processors.batch import BatchProcessor
-from pydantic import BaseModel
 
 
 class BaseProcessor(ABC):

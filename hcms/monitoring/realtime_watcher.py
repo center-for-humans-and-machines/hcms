@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from pydantic import ValidationError
+
 from hcms.database.models import ConversationDocument
 from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
@@ -16,7 +18,6 @@ from hcms.database.repository import (
     MessageBackfillTarget,
     MongoConversationRepository,
 )
-from pydantic import ValidationError
 
 LOGGER = logging.getLogger(__name__)
 

@@ -33,9 +33,8 @@ def test_found_expected_number_of_paths():
     ]
 
     # Adjust this number based on how many _PATH constants you expect
-    assert len(path_vars) >= 4, (
-        f"Expected at least 4 _PATH constants, found: {path_vars}"
-    )
+    message = f"Expected at least 4 _PATH constants, found: {path_vars}"
+    assert len(path_vars) >= 4, message
 
 
 def test_path_constants_are_path_objects():
@@ -45,6 +44,5 @@ def test_path_constants_are_path_objects():
     path_vars = [(name, value) for name, value in all_attrs if name.endswith("_PATH")]
 
     for name, value in path_vars:
-        assert isinstance(value, Path), (
-            f"{name} should be a Path object, got {type(value)}"
-        )
+        message = f"{name} should be a Path object, got {type(value)}"
+        assert isinstance(value, Path), message

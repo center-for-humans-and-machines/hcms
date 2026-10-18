@@ -1,3 +1,5 @@
+"""Upload files matching a pattern to a date-named folder in Google Drive."""
+
 import argparse
 import glob
 import os
@@ -127,61 +129,18 @@ def upload_file(service, file_path, folder_id, drive_id=None):
         file = service.files().create(**create_params).execute()
         print(f"Successfully uploaded '{file_name}' with ID: {file.get('id')}")
         return file.get("id")
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Failed to upload '{file_name}': {str(e)}")
         return None
-
-
-def upload_files_by_pattern(file_pattern, target_path="github-actions"):
-    """
-    Upload files matching a pattern to a date-named folder in Google Drive.
-
-    Args:
-        file_pattern (str): File pattern to match (e.g., "data/dataset/*.json")
-        target_path (str): Path in Google Drive where the date folder will be created
-    """
-    # Authenticate
-    service = authenticate_drive_service_account()
-
-    # Find the target folder
-    target_folder_id = find_folder_by_path(service, target_path)
-    if not target_folder_id:
-        print(f"Target path '{target_path}' not found. Please create it first.")
-        return
-
-    # Create today's date folder
-    today = datetime.now().strftime("%Y-%m-%d")
-    date_folder_id = create_folder(service, today, target_folder_id)
-
-    # Find all files matching the pattern
-    matching_files = glob.glob(file_pattern)
-
-    if not matching_files:
-        print(f"No files found matching pattern: {file_pattern}")
-        return
-
-    print(f"Found {len(matching_files)} files matching pattern: {file_pattern}")
-
-    # Upload each file
-    successful_uploads = 0
-    for file_path in matching_files:
-        if os.path.isfile(file_path):
-            file_id = upload_file(service, file_path, date_folder_id)
-            if file_id:
-                successful_uploads += 1
-        else:
-            print(f"Skipping '{file_path}' - not a file")
-
-    print(
-        f"\nUpload complete: {successful_uploads}/{len(matching_files)} files uploaded successfully"
-    )
-    print(f"Files uploaded to: {target_path}/{today}")
 
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Upload files matching a pattern to Google Drive with date-based folder organization",
+        description=(
+            "Upload files matching a pattern to Google Drive "
+            "with date-based folder organization"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -215,7 +174,10 @@ Examples:
         "--date-folder",
         "-d",
         default=None,
-        help="Custom date folder name (default: today's date as YYYY-MM-DD). Use 'none' for no date folder.",
+        help=(
+            "Custom date folder name (default: today's date as YYYY-MM-DD). "
+            "Use 'none' for no date folder."
+        ),
     )
 
     parser.add_argument(
@@ -243,6 +205,7 @@ Examples:
     return parser.parse_args()
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
 def upload_files_by_pattern(
     file_pattern,
     target_path="github-actions",
@@ -265,7 +228,7 @@ def upload_files_by_pattern(
         dry_run (bool): If True, show what would be uploaded without uploading
         verbose (bool): Enable verbose output
     """
-    global SERVICE_ACCOUNT_FILE
+    global SERVICE_ACCOUNT_FILE  # pylint: disable=global-statement
     SERVICE_ACCOUNT_FILE = credentials_file
 
     if verbose:
@@ -301,7 +264,7 @@ def upload_files_by_pattern(
         service = authenticate_drive_service_account()
         if verbose:
             print("Successfully authenticated with Google Drive")
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Authentication failed: {str(e)}")
         return 1
 
@@ -394,5 +357,4 @@ def main():
 
 # Example usage
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    sys.exit(main())

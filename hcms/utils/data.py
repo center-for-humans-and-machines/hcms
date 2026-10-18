@@ -36,6 +36,7 @@ def validate_schema(schema: Type[T]):
 
     return decorator
 
+
 # pylint: disable-next=too-few-public-methods
 class FileValidatorMixin(BaseModel):
     """Mixin for file validation.

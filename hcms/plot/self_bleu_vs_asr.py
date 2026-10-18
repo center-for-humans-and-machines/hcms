@@ -3,7 +3,6 @@
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from hcms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element
 from plotnine import (
     aes,
     facet_wrap,
@@ -17,6 +16,8 @@ from plotnine import (
     xlim,
     ylim,
 )
+
+from hcms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element
 
 
 def create_four_plots(

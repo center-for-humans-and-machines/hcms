@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional, Set
 
+from pydantic import ValidationError
+
 from hcms.constants import SYSTEM
 from hcms.database.models import ConversationDocument, MessageDocument
-from pydantic import ValidationError
 
 SYSTEM_OPENAI_REVIEWER_ID = "system_openai_moderation"
 SYSTEM_LLAMA_REVIEWER_ID = "system_llama_guard"

@@ -5,8 +5,9 @@ This module provides a factory function to create OpenAI or Azure client based o
 
 from typing import Union
 
-from hcms.utils import get_env_variable
 from openai import AzureOpenAI, OpenAI
+
+from hcms.utils import get_env_variable
 
 
 def create_client() -> Union[OpenAI, AzureOpenAI]:

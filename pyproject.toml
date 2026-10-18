@@ -43,6 +43,10 @@ pytz = ">=2025.2,<2027.0"
 pylint = "^3.3.2"
 pyink = "^24.10.1"
 
+[tool.isort]
+profile = "black"
+known_first_party = ["hcms"]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

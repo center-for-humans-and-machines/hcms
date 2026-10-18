@@ -17,6 +17,7 @@ class BotRatingResponse(BaseModel):
     explanation: str = Field(..., description="Explanation of the rating")
 
 
+# pylint: disable-next=too-few-public-methods
 class ConversationTurn(BaseModel):
     """Represents a single turn in a conversation."""
 
