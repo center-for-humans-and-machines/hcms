@@ -18,7 +18,10 @@ updates:
       default-days: 7
 
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # Also update actions pinned inside the local composite actions
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
     cooldown:
