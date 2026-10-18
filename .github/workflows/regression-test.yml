@@ -34,10 +34,10 @@ jobs:
           - gpt-5.3-chat-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -50,7 +50,7 @@ jobs:
           python -m poetry config virtualenvs.in-project true
 
       - name: Set up cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cached-poetry-dependencies
         with:
           path: .venv
@@ -69,7 +69,7 @@ jobs:
           poetry run python generate_dataset.py --round-number=${{ matrix.round_number }} --tag=regression-pipeline
 
       - name: Archive data generation results to GitHub
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: reg-test-gen-round-${{ matrix.round_number }}-${{ matrix.chat_model }}-${{ github.run_id }}
           path: |
@@ -102,10 +102,10 @@ jobs:
         round_number: [2, 3]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -118,7 +118,7 @@ jobs:
           python -m poetry config virtualenvs.in-project true
 
       - name: Set up cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cached-poetry-dependencies
         with:
           path: .venv
@@ -129,7 +129,7 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
 
       - name: Download artifacts for current round
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: reg-test-gen-round-${{ matrix.round_number }}-*-${{ github.run_id }}
           merge-multiple: true
@@ -150,7 +150,7 @@ jobs:
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
       - name: Archive data evaluation results to GitHub
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: reg-test-eval-round-${{ matrix.round_number }}-${{ github.run_id }}
           path: |
