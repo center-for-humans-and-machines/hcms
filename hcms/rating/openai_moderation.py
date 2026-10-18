@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import List
 
 import polars as pl
+from openai import OpenAI
+
 from hcms.loading.constants import DATASET_DIR
 from hcms.utils import get_env_variable
 from hcms.utils.cache import get_cached_result, save_cached_result
 from hcms.utils.moderation import RatingConfig, _rate_and_save_conversations
-from openai import OpenAI
 
 client = OpenAI(api_key=get_env_variable("OPENAI_MODERATION_API_KEY"))
 

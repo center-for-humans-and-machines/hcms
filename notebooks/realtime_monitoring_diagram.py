@@ -18,7 +18,9 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402  # pylint: disable=wrong-import-position
-from matplotlib.patches import Rectangle  # noqa: E402  # pylint: disable=wrong-import-position
+from matplotlib.patches import (  # noqa: E402  # pylint: disable=wrong-import-position
+    Rectangle,
+)
 
 # ── Typography ────────────────────────────────────────────────────────────────
 plt.rcParams.update(

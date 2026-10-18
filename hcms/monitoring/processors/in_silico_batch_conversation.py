@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import polars as pl
+
 from hcms.loading import COMPANION_SYSTEM_PROMPT_PATH, PSYCHIATRIST_SYSTEM_PROMPT_PATH
 from hcms.monitoring.api import BatchConfig
 from hcms.monitoring.processors.base import BaseProcessor

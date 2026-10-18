@@ -11,13 +11,14 @@ from typing import Any
 
 import pytest
 from bson import ObjectId
+from pydantic import ValidationError
+
 from hcms.database.models import ConversationDocument
 from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
     MongoConversationRepository,
 )
-from pydantic import ValidationError
 
 
 @dataclass

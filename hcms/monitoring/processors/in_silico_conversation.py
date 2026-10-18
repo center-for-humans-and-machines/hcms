@@ -10,15 +10,16 @@ import backoff
 import openai
 import pytz
 from dotenv import load_dotenv
+from langfuse import get_client, observe
+from openai import AzureOpenAI, OpenAI
+from pydantic import BaseModel, ConfigDict, Field
+from tqdm import tqdm
+
 from hcms.constants import ASSISTANT, CONTENT, ROLE, SYSTEM, USER
 from hcms.loading import COMPANION_SYSTEM_PROMPT_PATH, PSYCHIATRIST_SYSTEM_PROMPT_PATH
 from hcms.loading.models import Role
 from hcms.monitoring.api import BatchConfig
 from hcms.utils import UTF_8, clean_text, get_env_variable
-from langfuse import get_client, observe
-from openai import AzureOpenAI, OpenAI
-from pydantic import BaseModel, ConfigDict, Field
-from tqdm import tqdm
 
 load_dotenv()
 

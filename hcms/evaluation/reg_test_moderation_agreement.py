@@ -28,7 +28,6 @@ from plotnine import (
 from hcms.evaluation.reg_test_categories_plots import LLAMA_GUARD_CATEGORIES
 from hcms.plot.config import PlotConfig, _get_acm_theme_elements, _get_text_element
 
-
 # Display labels and colors for the four overlap categories
 _OVERLAP_LABELS = {
     "Both": "Both (LG ∩ OAI)",
