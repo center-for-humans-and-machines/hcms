@@ -16,3 +16,9 @@ ignore-long-lines=^\s*(# )?<?https?://\S+>?$
 
 # Maximum number of characters on a single line.
 max-line-length=100
+
+[TYPECHECK]
+
+# plotnine scales are dataclasses with InitVar fields, which pylint
+# misreads as missing or unexpected constructor arguments
+ignored-modules=plotnine
