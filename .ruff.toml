@@ -1,0 +1,8 @@
+# Shared by pre-commit and super-linter. Without this file, super-linter
+# falls back to its own template, which conflicts with pyink.
+line-length = 88
+
+[lint]
+# Pin the pre-0.16 default rules so super-linter's newer ruff matches
+# the version pinned in .pre-commit-config.yaml
+select = ["E4", "E7", "E9", "F"]
