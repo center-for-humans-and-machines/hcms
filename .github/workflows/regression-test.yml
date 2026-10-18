@@ -82,7 +82,7 @@ jobs:
             data/dataset/*.json
 
       - name: Setup Google Drive credentials
-        uses: ./.github/actions/setup-gdrive
+        uses: ./.github/actions/setup-gdrive # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
@@ -175,7 +175,7 @@ jobs:
             data/dataset/rated-*
 
       - name: Setup Google Drive credentials
-        uses: ./.github/actions/setup-gdrive
+        uses: ./.github/actions/setup-gdrive # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 

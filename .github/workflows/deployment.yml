@@ -48,7 +48,7 @@ jobs:
 
       - name: Resolve service variables
         id: vars
-        uses: ./.github/actions/resolve-service-vars
+        uses: ./.github/actions/resolve-service-vars # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           service: ${{ matrix.service }}
           app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
@@ -145,7 +145,7 @@ jobs:
 
       - name: Resolve service variables
         id: vars
-        uses: ./.github/actions/resolve-service-vars
+        uses: ./.github/actions/resolve-service-vars # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           service: ${{ matrix.service }}
           app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
@@ -288,7 +288,7 @@ jobs:
 
       - name: Deploy with Helm
         id: deploy
-        uses: ./.github/actions/deploy-helm
+        uses: ./.github/actions/deploy-helm # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           app-name: ${{ steps.vars.outputs.app_name }}
           image-name: ${{ steps.vars.outputs.full_image }}
