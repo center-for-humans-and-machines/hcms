@@ -6,3 +6,7 @@ app_image: ""
 dockersecret: ""
 replica_count: 1
 deployment_vars: {}
+# Keep in sync with APP_UID/APP_GID in the Dockerfile
+security:
+  run_as_user: 10001
+  run_as_group: 10001
