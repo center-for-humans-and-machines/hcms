@@ -87,13 +87,18 @@ jobs:
           poetry run python upload_to_gdrive.py "data/dataset/*.json" --target-path=dataset --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
 
       - name: Dataset Generation Summary
+        env:
+          ROUND_NUMBER: ${{ matrix.round_number }}
+          CHAT_MODEL: ${{ matrix.chat_model }}
         run: |
-          echo "## Dataset Generation Results - Round ${{ matrix.round_number }} - ${{ matrix.chat_model }}" >> $GITHUB_STEP_SUMMARY
-          echo "Generated datasets:" >> $GITHUB_STEP_SUMMARY
-          ls -la data/dataset/*.json | while read line; do
-            echo "- $line" >> $GITHUB_STEP_SUMMARY
-          done
-          echo "Dataset count: $(ls -1 data/dataset/*.json | wc -l)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Dataset Generation Results - Round ${ROUND_NUMBER} - ${CHAT_MODEL}"
+            echo "Generated datasets:"
+            find data/dataset -maxdepth 1 -name "*.json" -exec ls -la {} + | while read -r line; do
+              echo "- $line"
+            done
+            echo "Dataset count: $(find data/dataset -maxdepth 1 -name "*.json" | wc -l)"
+          } >> "$GITHUB_STEP_SUMMARY"
         if: ${{ !cancelled() }}
 
   eval-data:
@@ -172,15 +177,19 @@ jobs:
           poetry run python upload_to_gdrive.py "data/batch/*" --target-path=batch --drive-id="${GOOGLE_DRIVE_SHARED_DRIVE_ID}"
 
       - name: Evaluation Summary
+        env:
+          ROUND_NUMBER: ${{ matrix.round_number }}
         run: |
-          echo "## Evaluation Results - Round ${{ matrix.round_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "Batch files:" >> $GITHUB_STEP_SUMMARY
-          find data/batch -name "*.json" -o -name "*.jsonl" 2>/dev/null | while read file; do
-            echo "- $file ($(wc -l < "$file" 2>/dev/null || echo "0") lines)" >> $GITHUB_STEP_SUMMARY
-          done || echo "No batch files found" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Rated datasets:" >> $GITHUB_STEP_SUMMARY
-          ls data/dataset/rated-*.json 2>/dev/null | while read file; do
-            echo "- $file" >> $GITHUB_STEP_SUMMARY
-          done || echo "No rated datasets found" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Evaluation Results - Round ${ROUND_NUMBER}"
+            echo "Batch files:"
+            find data/batch -name "*.json" -o -name "*.jsonl" 2>/dev/null | while read -r file; do
+              echo "- $file ($(wc -l < "$file" 2>/dev/null || echo "0") lines)"
+            done || echo "No batch files found"
+            echo ""
+            echo "Rated datasets:"
+            find data/dataset -maxdepth 1 -name "rated-*.json" 2>/dev/null | sort | while read -r file; do
+              echo "- $file"
+            done || echo "No rated datasets found"
+          } >> "$GITHUB_STEP_SUMMARY"
         if: ${{ !cancelled() }}
