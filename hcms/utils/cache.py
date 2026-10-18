@@ -1,3 +1,5 @@
+"""On-disk cache for moderation results."""
+
 import ast
 import hashlib
 from pathlib import Path

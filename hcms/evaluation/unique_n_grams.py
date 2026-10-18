@@ -42,5 +42,3 @@ def percent_unique_ngrams(
         return 0.0
 
     return n_unique / n_total
-    return n_unique / n_total
-    return n_unique / n_total

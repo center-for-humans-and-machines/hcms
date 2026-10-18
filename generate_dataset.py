@@ -8,6 +8,9 @@ from typing import List, Optional
 
 import backoff
 import polars as pl
+from langfuse import get_client
+from tqdm import tqdm
+
 from hcms.loading.constants import (
     DATASET_2_CONVERSATION_STARTERS,
     DATASET_3_CONVERSATION_STARTERS,
@@ -16,8 +19,6 @@ from hcms.loading.constants import (
 from hcms.loading.models import ConversationType
 from hcms.monitoring.processors import InSilicoConversationProcessor
 from hcms.utils import UTF_8, get_env_variable
-from langfuse import get_client
-from tqdm import tqdm
 
 
 def read_lines(file_path: Path) -> List[str]:
@@ -85,7 +86,7 @@ async def get_cost_per_conversation(trace_id: Optional[str]) -> float:
 
         # If no cost information is available, return 0.0
         return 0.0
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Error retrieving cost for trace {trace_id}: {e}")
         return 0.0
 

@@ -224,5 +224,3 @@ class ConversationDocument(_NonBlankRequiredFieldMixin, BaseModel):
         if isinstance(value, str) and not value.strip():
             return None
         return value
-        return value
-        return value
