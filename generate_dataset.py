@@ -8,6 +8,9 @@ from typing import List, Optional
 
 import backoff
 import polars as pl
+from langfuse import get_client
+from tqdm import tqdm
+
 from hcms.loading.constants import (
     DATASET_2_CONVERSATION_STARTERS,
     DATASET_3_CONVERSATION_STARTERS,
@@ -16,8 +19,9 @@ from hcms.loading.constants import (
 from hcms.loading.models import ConversationType
 from hcms.monitoring.processors import InSilicoConversationProcessor
 from hcms.utils import UTF_8, get_env_variable
-from langfuse import get_client
-from tqdm import tqdm
+
+# Maximum page size accepted by the Langfuse observations API
+OBSERVATIONS_PAGE_SIZE = 1000
 
 
 def read_lines(file_path: Path) -> List[str]:
@@ -75,17 +79,24 @@ async def get_cost_per_conversation(trace_id: Optional[str]) -> float:
         # Initialize Langfuse client
         langfuse = get_client()
 
-        # Retrieve the trace using the trace_id
-        trace = await langfuse.async_api.trace.get(trace_id)
-
-        # Get the total cost from the trace
-        # Langfuse stores cost information in the trace's total_cost field
-        if trace and hasattr(trace, "total_cost") and trace.total_cost is not None:
-            return float(trace.total_cost)
-
-        # If no cost information is available, return 0.0
-        return 0.0
-    except Exception as e:
+        # Langfuse v5 removed trace.get; the trace cost is the sum of the
+        # costs of its observations, fetched page by page
+        # https://langfuse.com/faq/all/deprecated-api-migration
+        total_cost = 0.0
+        cursor: Optional[str] = None
+        while True:
+            page = await langfuse.async_api.observations.get_many(
+                trace_id=trace_id,
+                fields="core,usage",
+                limit=OBSERVATIONS_PAGE_SIZE,
+                cursor=cursor,
+            )
+            total_cost += sum(obs.total_cost or 0.0 for obs in page.data)
+            cursor = page.meta.cursor
+            if not cursor:
+                return total_cost
+    # Cost is informational; never let a lookup failure stop dataset generation
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Error retrieving cost for trace {trace_id}: {e}")
         return 0.0
 

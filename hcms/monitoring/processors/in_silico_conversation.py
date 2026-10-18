@@ -10,15 +10,16 @@ import backoff
 import openai
 import pytz
 from dotenv import load_dotenv
+from langfuse import get_client, observe, propagate_attributes
+from openai import AzureOpenAI, OpenAI
+from pydantic import BaseModel, ConfigDict, Field
+from tqdm import tqdm
+
 from hcms.constants import ASSISTANT, CONTENT, ROLE, SYSTEM, USER
 from hcms.loading import COMPANION_SYSTEM_PROMPT_PATH, PSYCHIATRIST_SYSTEM_PROMPT_PATH
 from hcms.loading.models import Role
 from hcms.monitoring.api import BatchConfig
 from hcms.utils import UTF_8, clean_text, get_env_variable
-from langfuse import get_client, observe
-from openai import AzureOpenAI, OpenAI
-from pydantic import BaseModel, ConfigDict, Field
-from tqdm import tqdm
 
 load_dotenv()
 
@@ -352,68 +353,73 @@ class InSilicoConversationProcessor:
         Args:
             initial_user_message (str): The initial message from the user to start the conversation.
         """
-        if self.session.tags:
-            # Add tag to the trace
-            langfuse.update_current_trace(tags=self.session.tags)
+        # Langfuse v4+ replaced update_current_trace() with propagate_attributes(),
+        # which tags this observation and every child observation in its scope
+        # https://langfuse.com/docs/observability/sdk/upgrade-path/python-v3-to-v4
+        with propagate_attributes(tags=self.session.tags or None):
+            # Set the trace ID for the session
+            # The trace ID is used to link the conversation to a specific trace in Langfuse
+            self.session.trace_id = langfuse.get_current_trace_id()
 
-        # Set the trace ID for the session
-        # The trace ID is used to link the conversation to a specific trace in Langfuse
-        self.session.trace_id = langfuse.get_current_trace_id()
+            user_prompt = self.prompts.clinician
+            assistant_prompt = self.prompts.companion
 
-        user_prompt = self.prompts.clinician
-        assistant_prompt = self.prompts.companion
+            if self.print_conversation:
+                self._print_conversation_message(
+                    role=Role.CLINICIAN.value, content=initial_user_message
+                )
 
-        if self.print_conversation:
-            self._print_conversation_message(
-                role=Role.CLINICIAN.value, content=initial_user_message
-            )
+            self.session.created_at = self._get_timestamp()
 
-        self.session.created_at = self._get_timestamp()
+            # Initial turn
+            conversation = [
+                {ROLE: SYSTEM, CONTENT: user_prompt},
+                {
+                    ROLE: USER,
+                    CONTENT: initial_user_message,
+                },
+            ]
 
-        # Initial turn
-        conversation = [
-            {ROLE: SYSTEM, CONTENT: user_prompt},
-            {
-                ROLE: USER,
-                CONTENT: initial_user_message,
-            },
-        ]
+            # Chat loop with progress bar
+            with tqdm(
+                total=self.max_turns,
+                desc="Conversation progress",
+                unit="turn",
+                leave=False,
+            ) as pbar:
+                for turn in range(self.max_turns):
+                    try:
+                        # Assistant turn
+                        conversation = self._get_assistant_response(
+                            assistant_prompt=assistant_prompt, conversation=conversation
+                        )
+                    except ValueError as e:
+                        print(
+                            f"\nConversation ended early due to assistant response error: {e}"
+                        )
+                        self.session.updated_at = self._get_timestamp()
+                        break
 
-        # Chat loop with progress bar
-        with tqdm(
-            total=self.max_turns, desc="Conversation progress", unit="turn", leave=False
-        ) as pbar:
-            for turn in range(self.max_turns):
-                try:
-                    # Assistant turn
-                    conversation = self._get_assistant_response(
-                        assistant_prompt=assistant_prompt, conversation=conversation
-                    )
-                except ValueError as e:
-                    print(
-                        f"\nConversation ended early due to assistant response error: {e}"
-                    )
+                    # Check if this is the last turn - if so, don't get clinician response
+                    if turn == self.max_turns - 1:
+                        self.session.updated_at = self._get_timestamp()
+                        pbar.update(1)  # Update progress bar for the final turn
+                        break
+
+                    try:
+                        # User turn
+                        conversation = self._get_user_response(
+                            user_prompt=user_prompt, conversation=conversation
+                        )
+                    except ValueError as e:
+                        print(
+                            f"\nConversation ended early due to user response error: {e}"
+                        )
+                        self.session.updated_at = self._get_timestamp()
+                        break
+
                     self.session.updated_at = self._get_timestamp()
-                    break
+                    pbar.update(1)  # Update progress bar after each complete turn
 
-                # Check if this is the last turn - if so, don't get clinician response
-                if turn == self.max_turns - 1:
-                    self.session.updated_at = self._get_timestamp()
-                    pbar.update(1)  # Update progress bar for the final turn
-                    break
-
-                try:
-                    # User turn
-                    conversation = self._get_user_response(
-                        user_prompt=user_prompt, conversation=conversation
-                    )
-                except ValueError as e:
-                    print(f"\nConversation ended early due to user response error: {e}")
-                    self.session.updated_at = self._get_timestamp()
-                    break
-
-                self.session.updated_at = self._get_timestamp()
-                pbar.update(1)  # Update progress bar after each complete turn
-
-        # Store the conversation history
-        self.conversation_history = conversation
+            # Store the conversation history
+            self.conversation_history = conversation
