@@ -7,6 +7,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 env:
   BATCH_PROVIDER: openai
   BATCH_MODEL_NAME: ${{ vars.BATCH_MODEL_NAME }}
@@ -25,6 +27,8 @@ env:
 jobs:
   gen-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +109,8 @@ jobs:
 
   eval-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: gen-data
     strategy:
       matrix:
