@@ -25,6 +25,8 @@ services:
       - FIX_SHELL_SHFMT=true
       # https://github.com/super-linter/super-linter/issues/5070#issuecomment-2058901647
       - SHELL=/bin/bash
+      # Helm templates aren't valid YAML until rendered
+      - FILTER_REGEX_EXCLUDE=kubernetes/.*/templates/.*
     volumes:
       - .:/tmp/lint
     platform: linux/amd64
