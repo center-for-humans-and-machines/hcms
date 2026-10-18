@@ -1,0 +1,5 @@
+[codespell]
+# Notebook outputs and PDF streams are not prose
+skip = *.ipynb,*.pdf
+# astroid is pylint's dependency, listed in poetry.lock
+ignore-words-list = astroid
