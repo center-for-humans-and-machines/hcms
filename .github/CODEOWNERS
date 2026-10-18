@@ -1,0 +1,4 @@
+# .github/CODEOWNERS (or place in /CODEOWNERS or docs/CODEOWNERS)
+
+# Everything in the repo → requests review from these users
+* @rodrigobdz @alidasmeh
