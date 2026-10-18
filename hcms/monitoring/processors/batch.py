@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import polars as pl
+from openai.lib import type_to_response_format_param
+from openai.types.batch import Batch
+from pydantic import BaseModel, ValidationError
+
 from hcms.constants import CONTENT, ROLE, SYSTEM, USER
 from hcms.monitoring.api import BatchConfig, create_client
 from hcms.monitoring.constants import BatchStatus
-from openai.lib._parsing._completions import type_to_response_format_param
-from openai.types.batch import Batch
-from pydantic import BaseModel, ValidationError
 
 
 class BatchProcessor:
