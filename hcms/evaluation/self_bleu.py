@@ -26,9 +26,10 @@ from typing import List, Optional
 
 import numpy as np
 import polars as pl
-from hcms.utils.cache import get_cached_result, save_cached_result
 from nltk import word_tokenize
 from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
+
+from hcms.utils.cache import get_cached_result, save_cached_result
 
 
 def calculate_self_bleu(
@@ -268,7 +269,7 @@ def calculate_vocab_size(df, n_gram=4) -> int:
         Number of unique n-grams in the dataset
     """
     texts = extract_conversation_texts(df)
-    ngrams_set = set()
+    ngrams_set: set[tuple[str, ...]] = set()
 
     for text in texts:
         tokens = word_tokenize(text.lower())

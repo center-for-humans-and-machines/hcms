@@ -1,12 +1,13 @@
 """Scientific visualization of LLM judge ratings distribution."""
 
+from datetime import datetime
 from typing import Dict, Tuple
 
 import pandas as pd
 import polars as pl
-from hcms.plot.config import PlotConfig, _get_base_theme_elements, _get_text_element
 from plotnine import (
     aes,
+    element_blank,
     facet_wrap,
     geom_bar,
     ggplot,
@@ -16,6 +17,20 @@ from plotnine import (
     scale_x_continuous,
     theme,
 )
+
+from hcms.plot.config import PlotConfig, _get_acm_theme_elements
+
+
+def _resolve_date_indexed_data(data: Dict) -> Dict:
+    """Resolve date-indexed stats mapping from supported input shapes."""
+    if not isinstance(data, dict):
+        return {}
+
+    statistics = data.get("statistics")
+    if isinstance(statistics, dict):
+        return statistics
+
+    return data
 
 
 def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
@@ -30,9 +45,17 @@ def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
     records = []
     round_mapping = {"round_2": "Standardized", "round_3": "Open-Ended"}
 
+    data = _resolve_date_indexed_data(data)
     sorted_dates = sorted(data.keys())
 
+    # pylint: disable-next=too-many-nested-blocks
     for day_num, date in enumerate(sorted_dates, 1):
+        try:
+            day_date = datetime.strptime(str(date), "%Y-%m-%d").strftime("%b %d")
+            day_label = f"Day {day_num} ({day_date})"
+        except ValueError:
+            day_label = f"Day {day_num} ({date})"
+
         for round_key, round_name in round_mapping.items():
             if round_key in data[date]:
                 round_data = data[date][round_key]
@@ -45,7 +68,7 @@ def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
                         for rating in llm_judge_data["ratings"]:
                             records.append(
                                 {
-                                    "day": f"Day {day_num}",
+                                    "day": day_label,
                                     "round_type": round_name,
                                     "rating": rating,
                                 }
@@ -54,10 +77,11 @@ def prepare_llm_judge_distribution_data(data: Dict) -> pl.DataFrame:
     return pl.DataFrame(records)
 
 
+# pylint: disable-next=too-many-locals
 def create_distribution_plot(
     data: Dict,
     save_path: str = "llm_judge_ratings_distribution.pdf",
-    figsize: Tuple[float, float] = (16, 7),
+    figsize: Tuple[float, float] = (PlotConfig.ACM_TEXT_WIDTH, 3.0),
 ) -> object:
     """Create distribution plot showing frequency of ratings by day.
 
@@ -82,9 +106,19 @@ def create_distribution_plot(
     df_pandas["round_type"] = pd.Categorical(
         df_pandas["round_type"], categories=["Standardized", "Open-Ended"], ordered=True
     )
+    # Sort days numerically ("Day 2" before "Day 10") so facet_wrap respects the order
+    day_order = sorted(df_pandas["day"].unique(), key=lambda d: int(d.split()[1]))
+    df_pandas["day"] = pd.Categorical(
+        df_pandas["day"], categories=day_order, ordered=True
+    )
 
     # Define colors for consistency
     colors = {"Standardized": "#2E86AB", "Open-Ended": "#A23B72"}
+
+    # Keep all day facets in one row and expand width as needed for readability.
+    min_panel_width = 1.15
+    figure_width = max(figsize[0], len(day_order) * min_panel_width)
+    dynamic_figsize = (figure_width, figsize[1])
 
     # Calculate min and max rating for scale
     min_rating = int(df_pandas["rating"].min())
@@ -99,7 +133,7 @@ def create_distribution_plot(
             breaks=range(min_rating, max_rating + 1),
             limits=(min_rating - 0.5, max_rating + 0.5),
         )
-        + facet_wrap("day", ncol=5)
+        + facet_wrap("day", ncol=max(1, len(day_order)))
         + labs(
             title="Distribution of LLM Judge Safety Ratings by Day",
             x="Rating",
@@ -107,15 +141,12 @@ def create_distribution_plot(
         )
     )
 
-    # Apply custom theme
-    theme_elements = _get_base_theme_elements()
+    # Apply ACM TIST theme: no embedded title, 8–9pt fonts, text-width figure
+    theme_elements = _get_acm_theme_elements()
     theme_elements.update(
         {
-            "figure_size": figsize,
-            "plot_title": _get_text_element(PlotConfig.FONT_SIZE_BOLD, bold=True),
-            "axis_title": _get_text_element(PlotConfig.FONT_SIZE_REGULAR, bold=True),
-            "legend_title": _get_text_element(PlotConfig.FONT_SIZE_REGULAR, bold=True),
-            "strip_text": _get_text_element(PlotConfig.FONT_SIZE_REGULAR, bold=True),
+            "figure_size": dynamic_figsize,
+            "plot_title": element_blank(),
         }
     )
     plot = plot + theme(**theme_elements)

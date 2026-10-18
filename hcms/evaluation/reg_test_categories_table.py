@@ -32,8 +32,12 @@ def analyze_flag_categories(
         tuple: (llama_guard_totals, openai_moderation_totals) where each is a dict
                with round names as keys and category counts as values
     """
-    llama_guard_totals = defaultdict(lambda: defaultdict(int))
-    openai_moderation_totals = defaultdict(lambda: defaultdict(int))
+    llama_guard_totals: defaultdict[str, defaultdict[str, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
+    openai_moderation_totals: defaultdict[str, defaultdict[str, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
 
     # Mapping for round names
     round_mapping = {"round_2": "Standardized", "round_3": "Open-Ended"}
@@ -126,6 +130,7 @@ def escape_latex_chars(text: str) -> str:
     )
 
 
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
 def generate_flag_categories_latex_table(data: dict) -> str:
     """Generate LaTeX table showing flag categories by round type.
 
@@ -138,8 +143,8 @@ def generate_flag_categories_latex_table(data: dict) -> str:
     llama_guard_totals, openai_moderation_totals = analyze_flag_categories(data)
 
     # Collect all unique categories
-    all_llama_categories = set()
-    all_openai_categories = set()
+    all_llama_categories: set[str] = set()
+    all_openai_categories: set[str] = set()
 
     for round_name in ["Standardized", "Open-Ended"]:
         if round_name in llama_guard_totals:
@@ -182,19 +187,22 @@ def generate_flag_categories_latex_table(data: dict) -> str:
 
         if first_llama:
             table.append(
-                f"\\textbf{{\\llama~Guard}} & {escaped_category} & {std_count} ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
+                f"\\textbf{{\\llama~Guard}} & {escaped_category}"
+                f" & {std_count} ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
             )
             first_llama = False
         else:
             table.append(
-                f"& {escaped_category} & {std_count} ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
+                f"& {escaped_category} & {std_count}"
+                f" ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
             )
 
     # Add Llama Guard sum row
     if sorted_llama_categories:
         table.append("\\cmidrule(lr){2-4}")
         table.append(
-            f"& \\textbf{{Sum}} & \\textbf{{{llama_std_total}}} (100.0\\%) & \\textbf{{{llama_open_total}}} (100.0\\%) \\\\"
+            f"& \\textbf{{Sum}} & \\textbf{{{llama_std_total}}} (100.0\\%)"
+            f" & \\textbf{{{llama_open_total}}} (100.0\\%) \\\\"
         )
 
     if sorted_llama_categories and sorted_openai_categories:
@@ -220,18 +228,21 @@ def generate_flag_categories_latex_table(data: dict) -> str:
 
             if first_openai:
                 table.append(
-                    f"\\textbf{{\\openai~Moderation}} & {escaped_category} & {std_count} ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
+                    f"\\textbf{{\\openai~Moderation}} & {escaped_category}"
+                    f" & {std_count} ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
                 )
                 first_openai = False
             else:
                 table.append(
-                    f"& {escaped_category} & {std_count} ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
+                    f"& {escaped_category} & {std_count}"
+                    f" ({std_pct:.1f}\\%) & {open_count} ({open_pct:.1f}\\%) \\\\"
                 )
 
         # Add OpenAI Moderation sum row
         table.append("\\cmidrule(lr){2-4}")
         table.append(
-            f"& \\textbf{{Sum}} & \\textbf{{{openai_std_total}}} (100.0\\%) & \\textbf{{{openai_open_total}}} (100.0\\%) \\\\"
+            f"& \\textbf{{Sum}} & \\textbf{{{openai_std_total}}} (100.0\\%)"
+            f" & \\textbf{{{openai_open_total}}} (100.0\\%) \\\\"
         )
     else:
         table.append(
@@ -241,7 +252,10 @@ def generate_flag_categories_latex_table(data: dict) -> str:
     table.append("\\bottomrule")
     table.append("\\end{tabular}")
     table.append(
-        "\\caption{\\textbf{Flagged messages by prompt type and category.} Number and percentage of flagged messages per category for standardized and open-ended prompts, as classified by Llama Guard and OpenAI Moderation models.}"
+        "\\caption{\\textbf{Flagged messages by prompt type and category.}"
+        " Number and percentage of flagged messages per category for standardized"
+        " and open-ended prompts, as classified by Llama Guard and OpenAI Moderation"
+        " models.}"
     )
     table.append("\\label{tab:flag_categories}")
     table.append("\\end{table}")
