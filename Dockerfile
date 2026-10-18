@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -21,18 +21,19 @@ RUN poetry config virtualenvs.create false \
   && poetry install --no-root --no-interaction --no-ansi
 
 # Stage 2: Runtime
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+# Keep the Python version in this path in sync with the FROM tags above
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 
 COPY . .
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import hpms.database.models, pymongo, pydantic" || exit 1
+  CMD ["python", "-c", "import hcms.database.models, pymongo, pydantic"]
 
-CMD ["python", "-m", "hpms.monitoring.watch_mongo_conversations"]
+CMD ["python", "-m", "hcms.monitoring.watch_mongo_conversations"]

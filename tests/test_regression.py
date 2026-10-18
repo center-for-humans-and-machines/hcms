@@ -1,6 +1,6 @@
 """Regression test for LLM responses."""
 
-from hpms.monitoring import RegTestProcessor
+from hcms.monitoring import RegTestProcessor
 
 
 def test_regression():

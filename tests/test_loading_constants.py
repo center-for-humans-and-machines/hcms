@@ -3,7 +3,7 @@
 import inspect
 from pathlib import Path
 
-from hpms.loading import constants
+from hcms.loading import constants
 
 
 def test_all_path_constants_exist():

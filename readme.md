@@ -1,6 +1,6 @@
-# HPMS
+# HCMS
 
-Hybrid Psychiatrist-in-the-Loop Monitoring System (HPMS) for safety monitoring and evaluation of LLM conversational agents.
+Hybrid Clinician-in-the-Loop Monitoring System (HCMS) for safety monitoring and evaluation of LLM conversational agents.
 
 ## Requirements
 
@@ -81,7 +81,7 @@ Watcher runtime behavior:
 
 - Startup backfill retries transient provider failures (default `10` retries, `2s` between no-progress retries).
 - Change stream reconnect uses exponential backoff with jitter (default `1s` base, `30s` max, `0.25s` jitter).
-- Logging level defaults to `INFO` and can be tuned with `HPMS_LOG_LEVEL`.
+- Logging level defaults to `INFO` and can be tuned with `HCMS_LOG_LEVEL`.
 
 Main tuning variables (set in `.env`):
 
@@ -92,7 +92,7 @@ Main tuning variables (set in `.env`):
 - `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS`
 - `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS`
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS`
-- `HPMS_LOG_LEVEL`
+- `HCMS_LOG_LEVEL`
 
 Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
 
@@ -106,8 +106,8 @@ errors for `mongo`.
 
 ## Documentation
 
-- Architecture Decision Record (ADR) for compose split and local monitoring stack: [BAN-24 compose restructure](./docs/adr/2026-03-02-ban-24-compose-restructure-local.md)
-- ADR for Mongo schema alignment and realtime watcher: [BAN-24 schema and watcher](./docs/adr/2026-03-02-ban-24-hpms-mongo-schema-alignment-and-realtime.md)
+- Architecture Decision Record (ADR) for compose split and local monitoring stack: [Compose restructure](./docs/adr/2026-03-02-compose-restructure-local-monitoring.md)
+- ADR for Mongo schema alignment and realtime watcher: [Schema and watcher](./docs/adr/2026-03-02-hcms-mongo-schema-alignment-and-realtime-monitoring.md)
 - Paper data workflow: [paper-data-workflow.md](./docs/paper-data-workflow.md)
 - CI/CD deployment: [ci-cd-deployment.md](./docs/ci-cd-deployment.md)
 - Contribution guide: [contributing.md](./contributing.md)

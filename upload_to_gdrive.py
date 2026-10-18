@@ -188,7 +188,7 @@ Examples:
   python gdrive_upload.py "data/dataset/*.json"
   python gdrive_upload.py "logs/*.txt" --target-path "github-actions" --credentials "my_creds.json"
   python gdrive_upload.py "data/*.csv" --date-folder "2024-12-25"
-  python gdrive_upload.py "images/*.jpg" --no-date-folder --target-path "hpms/images"
+  python gdrive_upload.py "images/*.jpg" --no-date-folder --target-path "hcms/images"
         """,
     )
 

@@ -1,3 +1,5 @@
+"""Download regression test data from Google Drive into data/paper/github-actions/."""
+
 import argparse
 import os
 import sys
@@ -9,16 +11,20 @@ from googleapiclient.http import MediaIoBaseDownload
 
 SERVICE_ACCOUNT_FILE = "credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 
 def authenticate_drive_service_account(credentials_file):
+    """Build a Drive v3 client authenticated with a service account."""
     credentials = Credentials.from_service_account_file(credentials_file, scopes=SCOPES)
     return build("drive", "v3", credentials=credentials)
 
 
 def list_folders(service, parent_id, drive_id=None):
     """List all subfolders of a given folder."""
-    query = f"'{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    query = (
+        f"'{parent_id}' in parents and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
+    )
     params = {"q": query, "fields": "files(id, name)"}
     if drive_id:
         params.update(
@@ -35,7 +41,9 @@ def list_folders(service, parent_id, drive_id=None):
 
 def list_files(service, parent_id, drive_id=None):
     """List all files in a given folder."""
-    query = f"'{parent_id}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false"
+    query = (
+        f"'{parent_id}' in parents and mimeType!='{FOLDER_MIME_TYPE}' and trashed=false"
+    )
     params = {"q": query, "fields": "files(id, name)"}
     if drive_id:
         params.update(
@@ -52,7 +60,10 @@ def list_files(service, parent_id, drive_id=None):
 
 def find_folder_by_name(service, name, parent_id, drive_id=None):
     """Find a folder by name under a parent folder."""
-    query = f"name='{name}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    query = (
+        f"name='{name}' and '{parent_id}' in parents"
+        f" and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
+    )
     params = {"q": query, "fields": "files(id, name)"}
     if drive_id:
         params.update(
@@ -71,7 +82,10 @@ def find_folder_by_name(service, name, parent_id, drive_id=None):
 def find_top_level_folder(service, name, drive_id=None):
     """Find a top-level folder by name (in the root of a shared drive or My Drive)."""
     if drive_id:
-        query = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '{drive_id}' in parents"
+        query = (
+            f"name='{name}' and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
+            f" and '{drive_id}' in parents"
+        )
         params = {
             "q": query,
             "fields": "files(id, name)",
@@ -81,7 +95,7 @@ def find_top_level_folder(service, name, drive_id=None):
             "supportsAllDrives": True,
         }
     else:
-        query = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        query = f"name='{name}' and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
         params = {"q": query, "fields": "files(id, name)"}
     result = service.files().list(**params).execute()
     items = result.get("files", [])
@@ -101,7 +115,9 @@ def download_file(service, file_id, file_name, dest_dir, drive_id=None):
     if drive_id:
         params["supportsAllDrives"] = True
 
-    request = service.files().get_media(fileId=file_id, supportsAllDrives=bool(drive_id))
+    request = service.files().get_media(
+        fileId=file_id, supportsAllDrives=bool(drive_id)
+    )
     with open(dest_path, "wb") as f:
         downloader = MediaIoBaseDownload(f, request)
         done = False
@@ -111,6 +127,7 @@ def download_file(service, file_id, file_name, dest_dir, drive_id=None):
     return True
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def download_date_folders(
     service,
     source_folder_name,
@@ -140,7 +157,9 @@ def download_date_folders(
     if date_filter:
         date_folders = [f for f in date_folders if f["name"] == date_filter]
         if not date_folders:
-            print(f"No folder matching date '{date_filter}' found under '{source_folder_name}'.")
+            print(
+                f"No folder matching date '{date_filter}' found under '{source_folder_name}'."
+            )
             return 0
 
     total = 0
@@ -153,15 +172,21 @@ def download_date_folders(
                 print(f"    Would download: {f['name']}")
             continue
         for f in files:
-            download_file(service, f["id"], f["name"], Path(local_base_dir) / date, drive_id)
+            download_file(
+                service, f["id"], f["name"], Path(local_base_dir) / date, drive_id
+            )
             total += 1
 
     return total
 
 
 def main():
+    """Parse CLI arguments and download the requested date folders."""
     parser = argparse.ArgumentParser(
-        description="Download regression test data from Google Drive to local data/paper/github-actions/ structure"
+        description=(
+            "Download regression test data from Google Drive to local"
+            " data/paper/github-actions/ structure"
+        )
     )
     parser.add_argument(
         "--credentials",
@@ -183,7 +208,10 @@ def main():
         "--date",
         "-d",
         default=None,
-        help="Only download a specific date folder (e.g. 2026-04-08). Downloads all dates if omitted.",
+        help=(
+            "Only download a specific date folder (e.g. 2026-04-08)."
+            " Downloads all dates if omitted."
+        ),
     )
     parser.add_argument(
         "--dry-run",

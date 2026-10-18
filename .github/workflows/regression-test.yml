@@ -2,8 +2,6 @@ name: Regression testing
 
 on: # yamllint disable-line rule:truthy
   workflow_dispatch: # Enables manual trigger
-  schedule:
-    - cron: "0 6 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,12 +34,12 @@ jobs:
           - gpt-5.3-chat-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v6
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install poetry
         run: |
@@ -52,11 +50,11 @@ jobs:
           python -m poetry config virtualenvs.in-project true
 
       - name: Set up cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cached-poetry-dependencies
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.13-${{ hashFiles('**/poetry.lock') }}-self-hosted
+          key: venv-${{ runner.os }}-3.14-${{ hashFiles('**/poetry.lock') }}-self-hosted
 
       - name: Install dependencies
         run: poetry install
@@ -71,7 +69,7 @@ jobs:
           poetry run python generate_dataset.py --round-number=${{ matrix.round_number }} --tag=regression-pipeline
 
       - name: Archive data generation results to GitHub
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: reg-test-gen-round-${{ matrix.round_number }}-${{ matrix.chat_model }}-${{ github.run_id }}
           path: |
@@ -104,12 +102,12 @@ jobs:
         round_number: [2, 3]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v6
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install poetry
         run: |
@@ -120,18 +118,18 @@ jobs:
           python -m poetry config virtualenvs.in-project true
 
       - name: Set up cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cached-poetry-dependencies
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.13-${{ hashFiles('**/poetry.lock') }}-self-hosted
+          key: venv-${{ runner.os }}-3.14-${{ hashFiles('**/poetry.lock') }}-self-hosted
 
       - name: Install dependencies
         run: poetry install
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
 
       - name: Download artifacts for current round
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: reg-test-gen-round-${{ matrix.round_number }}-*-${{ github.run_id }}
           merge-multiple: true
@@ -146,12 +144,13 @@ jobs:
           MODEL_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MODEL_ENDPOINT: ${{ vars.OPENAI_ENDPOINT }}
           CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.DEFAULT_CHAT_COMPLETIONS_MODEL_NAME }}
+          LLM_AS_JUDGE_ENABLED: ${{ vars.LLM_AS_JUDGE_ENABLED }}
         timeout-minutes: 1440
         run: |
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
       - name: Archive data evaluation results to GitHub
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: reg-test-eval-round-${{ matrix.round_number }}-${{ github.run_id }}
           path: |

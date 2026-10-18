@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Start local monitoring stack (MongoDB + HPMS watcher).
+# Start local monitoring stack (MongoDB + hcms watcher).
 
 set -o errexit
 set -o pipefail

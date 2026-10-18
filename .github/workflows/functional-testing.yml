@@ -20,12 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v6
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install poetry
         run: |
@@ -36,11 +36,11 @@ jobs:
           python -m poetry config virtualenvs.in-project true
 
       - name: Set up cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cached-poetry-dependencies
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.13-${{ hashFiles('**/poetry.lock') }}-self-hosted
+          key: venv-${{ runner.os }}-3.14-${{ hashFiles('**/poetry.lock') }}-self-hosted
 
       - name: Install Python package
         run: |
@@ -51,7 +51,7 @@ jobs:
           ./script/test
 
       - name: Test Summary
-        uses: test-summary/action@v2.4
+        uses: test-summary/action@v2.6
         with:
           paths: ".test_report.xml"
           show: "fail"

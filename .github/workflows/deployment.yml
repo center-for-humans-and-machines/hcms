@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Validate MSW app name variable
         if: github.ref_name == 'elderbot-msw-2026'
@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload build metadata
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: build-meta-${{ matrix.service }}
           path: build-meta/${{ matrix.service }}.env
@@ -124,7 +124,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Validate MSW app name variable
         if: github.ref_name == 'elderbot-msw-2026'
@@ -175,7 +175,7 @@ jobs:
           MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_BASE_SECONDS || '1' }}
           MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_MAX_SECONDS || '30' }}
           MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: ${{ vars.MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS || '0.25' }}
-          HPMS_LOG_LEVEL: ${{ vars.HPMS_LOG_LEVEL || 'INFO' }}
+          HCMS_LOG_LEVEL: ${{ vars.HCMS_LOG_LEVEL || 'INFO' }}
         run: |
           set -euo pipefail
 
@@ -272,7 +272,7 @@ jobs:
             MONGODB_RECONNECT_BACKOFF_BASE_SECONDS: "$MONGODB_RECONNECT_BACKOFF_BASE_SECONDS"
             MONGODB_RECONNECT_BACKOFF_MAX_SECONDS: "$MONGODB_RECONNECT_BACKOFF_MAX_SECONDS"
             MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "$MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS"
-            HPMS_LOG_LEVEL: "$HPMS_LOG_LEVEL"
+            HCMS_LOG_LEVEL: "$HCMS_LOG_LEVEL"
             OPENAI_MODERATION_API_KEY: "$OPENAI_MODERATION_API_KEY"
             LLAMA_GUARD_API_KEY: "$LLAMA_GUARD_API_KEY"
             LLAMA_GUARD_ENDPOINT: "$LLAMA_GUARD_ENDPOINT"
@@ -334,7 +334,7 @@ jobs:
 
       - name: Upload deploy metadata
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: deploy-meta-${{ matrix.service }}
           path: deploy-meta/${{ matrix.service }}.env
@@ -348,7 +348,7 @@ jobs:
 
     steps:
       - name: Download build metadata
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: build-meta-*
@@ -356,7 +356,7 @@ jobs:
           merge-multiple: true
 
       - name: Download deployment metadata
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: deploy-meta-*
