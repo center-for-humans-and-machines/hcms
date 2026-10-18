@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -36,7 +36,7 @@ jobs:
           python -m poetry config virtualenvs.in-project true
 
       - name: Set up cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: cached-poetry-dependencies
         with:
           path: .venv
@@ -51,7 +51,7 @@ jobs:
           ./script/test
 
       - name: Test Summary
-        uses: test-summary/action@v2.4
+        uses: test-summary/action@v2.6
         with:
           paths: ".test_report.xml"
           show: "fail"

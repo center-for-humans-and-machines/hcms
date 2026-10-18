@@ -18,7 +18,7 @@ pydantic = "^2.11.3"
 backoff = "^2.2.1"
 langfuse = "^3.2.1"
 google-api-python-client = "^2.178.0"
-google-auth-httplib2 = "^0.2.0"
+google-auth-httplib2 = ">=0.2,<0.5"
 google-auth-oauthlib = "^1.2.2"
 
 [tool.poetry.group.dev.dependencies]
