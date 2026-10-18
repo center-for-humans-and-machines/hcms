@@ -65,3 +65,5 @@ jobs:
           # npm refuses to install pre-commit's git-based Node hooks (EALLOWGIT).
           # super-linter's MARKDOWN linter runs markdownlint instead.
           SKIP: markdownlint
+          # Helm templates aren't valid YAML until rendered
+          FILTER_REGEX_EXCLUDE: kubernetes/.*/templates/.*

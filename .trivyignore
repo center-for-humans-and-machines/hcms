@@ -1,0 +1,5 @@
+# KSV-0013: the Helm chart's app_image defaults to "", so Trivy renders an
+# untagged image. The Deployment workflow always sets app_image to
+# <registry>/<name>:<short-sha> (.github/actions/resolve-service-vars).
+# Making app_image `required` instead makes Trivy skip the whole chart.
+KSV-0013

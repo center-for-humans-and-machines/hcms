@@ -17,6 +17,7 @@
 .pre-commit-config.yaml
 .jscpd.json
 .markdownlint.yml
+.trivyignore
 .DS_Store
 
 __pycache__/
