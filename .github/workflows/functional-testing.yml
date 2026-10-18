@@ -22,10 +22,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Set up Python 3.13
+      - name: Set up Python 3.14
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install poetry
         run: |
@@ -40,7 +40,7 @@ jobs:
         id: cached-poetry-dependencies
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.13-${{ hashFiles('**/poetry.lock') }}-self-hosted
+          key: venv-${{ runner.os }}-3.14-${{ hashFiles('**/poetry.lock') }}-self-hosted
 
       - name: Install Python package
         run: |
