@@ -35,23 +35,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate MSW app name variable
-        if: github.ref_name == 'elderbot-msw-2026'
-        shell: bash
-        env:
-          APP_NAME_MSW: ${{ vars.APP_NAME_MSW }}
-        run: |
-          [[ -n "${APP_NAME_MSW}" ]] || {
-            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
-            exit 1
-          }
-
       - name: Resolve service variables
         id: vars
         uses: ./.github/actions/resolve-service-vars # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
+          app-name-prefix: ${{ vars.APP_NAME }}
+          msw-app-name-prefix: ${{ vars.APP_NAME_MSW }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}
@@ -132,23 +122,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate MSW app name variable
-        if: github.ref_name == 'elderbot-msw-2026'
-        shell: bash
-        env:
-          APP_NAME_MSW: ${{ vars.APP_NAME_MSW }}
-        run: |
-          [[ -n "${APP_NAME_MSW}" ]] || {
-            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
-            exit 1
-          }
-
       - name: Resolve service variables
         id: vars
         uses: ./.github/actions/resolve-service-vars # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
         with:
           service: ${{ matrix.service }}
-          app-name-prefix: ${{ github.ref_name == 'elderbot-msw-2026' && vars.APP_NAME_MSW || vars.APP_NAME }}
+          app-name-prefix: ${{ vars.APP_NAME }}
+          msw-app-name-prefix: ${{ vars.APP_NAME_MSW }}
           registry: ${{ env.REGISTRY }}
           docker-registry-prefix: ${{ env.DOCKER_REGISTRY_PREFIX }}
           branch: ${{ github.ref_name }}

@@ -8,6 +8,10 @@ inputs:
   app-name-prefix:
     description: Base application name prefix
     required: true
+  msw-app-name-prefix:
+    description: Application name prefix for the elderbot-msw-2026 branch
+    required: false
+    default: ""
   registry:
     description: Container registry host
     required: true
@@ -43,6 +47,7 @@ runs:
       env:
         SERVICE: ${{ inputs.service }}
         APP_NAME_PREFIX: ${{ inputs.app-name-prefix }}
+        MSW_APP_NAME_PREFIX: ${{ inputs.msw-app-name-prefix }}
         REGISTRY: ${{ inputs.registry }}
         DOCKER_REGISTRY_PREFIX: ${{ inputs.docker-registry-prefix }}
         BRANCH: ${{ inputs.branch }}
@@ -71,6 +76,14 @@ runs:
             exit 1
             ;;
         esac
+
+        if [[ "$branch" == "elderbot-msw-2026" ]]; then
+          if [[ -z "${MSW_APP_NAME_PREFIX}" ]]; then
+            echo "APP_NAME_MSW variable is not set for MSW branch deployment" >&2
+            exit 1
+          fi
+          APP_NAME_PREFIX="${MSW_APP_NAME_PREFIX}"
+        fi
 
         # Compose a stable Helm release + image name.
         #
