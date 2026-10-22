@@ -3,6 +3,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: {{ .Values.app_name }}
+  namespace: {{ .Release.Namespace }}
 type: kubernetes.io/dockerconfigjson
 data:
   .dockerconfigjson: {{ .Values.dockersecret }}
@@ -11,6 +12,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Values.app_name }}
+  namespace: {{ .Release.Namespace }}
   labels:
     helm.sh/chart: {{ .Chart.Name }}
     helm.sh/deploymentname: {{ .Values.app_name }}
@@ -32,10 +34,34 @@ spec:
         app: {{ .Values.app_name }}
     spec:
       terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.security.run_as_user }}
+        runAsGroup: {{ .Values.security.run_as_group }}
+        fsGroup: {{ .Values.security.run_as_group }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: {{ .Values.app_name }}
           image: {{ .Values.app_image }}
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: {{ .Values.security.run_as_user }}
+            runAsGroup: {{ .Values.security.run_as_group }}
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Moderation result cache written by hcms/utils/cache.py
+            - name: moderation-cache
+              mountPath: /app/data/dataset/cache
           resources:
             requests:
               memory: {{ .Values.resources.requests.memory | default "256Mi" | quote }}
@@ -50,5 +76,10 @@ spec:
               value: {{ $val | quote }}
             {{- end }}
           {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: moderation-cache
+          emptyDir: {}
       imagePullSecrets:
         - name: {{ .Values.app_name }}

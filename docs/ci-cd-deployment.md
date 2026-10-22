@@ -18,6 +18,7 @@ Supported deployment branches:
 
 - `dev`
 - `main`
+- `elderbot-msw-2026`
 
 Workflow triggers:
 
@@ -34,15 +35,21 @@ Workflow triggers:
 - GitHub Actions deployment environment:
   - `dev` branch deploys to the `dev` GitHub environment
   - `main` branch deploys to the `main` GitHub environment
+  - `elderbot-msw-2026` branch deploys to the `elderbot-msw-2026` GitHub environment
 
 ## Build and Deploy Logic
 
 The `watcher` service follows this flow:
 
-1. Resolve deterministic app/image naming (`<APP_NAME>-watcher-<branch>`).
+1. Resolve deterministic app/image naming (`hpms-watcher-<APP_NAME>-<branch>`).
 1. Build and push Docker image from `Dockerfile`.
 1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
 1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
+
+Naming note:
+
+- For `dev` and `main`, the name is `hpms-watcher-<APP_NAME>-<branch>`.
+- For `elderbot-msw-2026`, the name is `hpms-watcher-<APP_NAME_MSW>-msw`.
 
 ### Runtime deployment variables
 
@@ -77,14 +84,15 @@ Optional values with defaults:
 - `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS` (`1`)
 - `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS` (`30`)
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS` (`0.25`)
-- `HPMS_LOG_LEVEL` (`INFO`)
+- `HCMS_LOG_LEVEL` (`INFO`)
 
 ## Required GitHub Variables
 
 | Variable                      | Purpose                                                               |
 | ----------------------------- | --------------------------------------------------------------------- |
 | `GITLAB_REGISTRY`             | Docker registry host                                                  |
-| `APP_NAME`                    | Application name prefix used in image/release naming                  |
+| `APP_NAME`                    | Application slug used in image/release naming (no `hpms-` prefix)     |
+| `APP_NAME_MSW`                | Application slug for MSW environment (elderbot-msw-2026 branch)       |
 | `LLAMA_GUARD_ENDPOINT`        | Llama Guard endpoint URL                                              |
 | `LANGFUSE_HOST`               | Langfuse base URL used for telemetry export                           |
 | `MODEL_ENDPOINT`              | Chat/completions provider endpoint used by watcher                    |
@@ -92,6 +100,7 @@ Optional values with defaults:
 | `CHAT_COMPLETIONS_MODEL_NAME` | Chat model name used by watcher conversation processing               |
 | `MONGODB_DATABASE_DEV`        | MongoDB database name for `dev` deployments                           |
 | `MONGODB_DATABASE_MAIN`       | MongoDB database name for `main` deployments                          |
+| `MONGODB_DATABASE_MSW`        | MongoDB database name for `elderbot-msw-2026` deployments             |
 
 Optional variables:
 
@@ -111,11 +120,16 @@ Optional variables:
 | `DOCKERCFG`                 | Base64 Docker config JSON for Kubernetes image pull secret |
 | `MONGODB_URI_DEV`           | Watcher MongoDB URI for `dev` deployments                  |
 | `MONGODB_URI_MAIN`          | Watcher MongoDB URI for `main` deployments                 |
+| `MONGODB_URI_MSW`           | Watcher MongoDB URI for `elderbot-msw-2026` deployments    |
 | `MODEL_API_KEY`             | Provider API key used by watcher conversation processing   |
 | `LANGFUSE_PUBLIC_KEY`       | Langfuse public API key used by watcher telemetry          |
 | `LANGFUSE_SECRET_KEY`       | Langfuse secret API key used by watcher telemetry          |
 | `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher                      |
 | `LLAMA_GUARD_API_KEY`       | Llama Guard API key used by watcher                        |
+
+## Rename / migration note (Helm release name)
+
+The resolved app name is used as the **Helm release name**. If you change the naming scheme (or change `APP_NAME`), Helm will treat it as a different release and will **create a new release** on the next deployment, leaving the old release behind until you remove it.
 
 ## Kubernetes Chart Contract
 

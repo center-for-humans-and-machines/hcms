@@ -17,9 +17,9 @@ usage() {
 
   cat <<EOM
 
-  HPMS
+  hcms
 
-Run test suite for HPMS
+Run test suite for hcms
 
 Usage: ${RELATIVE_PATH} [options]
 

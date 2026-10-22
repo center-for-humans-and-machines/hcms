@@ -91,26 +91,33 @@ runs:
 
     - name: Deploy with Helm
       shell: bash
+      env:
+        APP_NAME: ${{ inputs.app-name }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        REPLICA_COUNT: ${{ inputs.replica-count }}
+        DEPLOYMENT_VARS: ${{ inputs.deployment-vars }}
+        DOCKERCFG: ${{ inputs.dockercfg }}
       run: |
         set -euo pipefail
 
         chart_dir="kubernetes/worker-service"
         helm_args=(
-          --set "app_name=${{ inputs.app-name }}"
-          --set "app_image=${{ inputs.image-name }}"
-          --set-string "dockersecret=${{ inputs.dockercfg }}"
-          --set "replica_count=${{ inputs.replica-count }}"
+          --set "app_name=${APP_NAME}"
+          --set "app_image=${IMAGE_NAME}"
+          --set-string "dockersecret=${DOCKERCFG}"
+          --set "replica_count=${REPLICA_COUNT}"
         )
 
-        if [[ -n "${{ inputs.deployment-vars }}" && -f "${{ inputs.deployment-vars }}" ]]; then
-          helm_args+=(--values "${{ inputs.deployment-vars }}")
+        if [[ -n "${DEPLOYMENT_VARS}" && -f "${DEPLOYMENT_VARS}" ]]; then
+          helm_args+=(--values "${DEPLOYMENT_VARS}")
         fi
 
         helm upgrade \
           --install \
-          --namespace "${{ inputs.namespace }}" \
+          --namespace "${NAMESPACE}" \
           --create-namespace \
-          "${{ inputs.app-name }}" \
+          "${APP_NAME}" \
           "$chart_dir" \
           "${helm_args[@]}" \
           --atomic \
@@ -118,13 +125,16 @@ runs:
 
     - name: Output deployment summary
       shell: bash
+      env:
+        APP_NAME: ${{ inputs.app-name }}
+        IMAGE_NAME: ${{ inputs.image-name }}
       run: |
         set -euo pipefail
 
         {
-          echo "### ${{ inputs.app-name }} deployment"
+          echo "### ${APP_NAME} deployment"
           echo
           echo "- Status: success"
-          echo "- Docker image: \`${{ inputs.image-name }}\`"
+          echo "- Docker image: \`${IMAGE_NAME}\`"
           echo
         } >> "$GITHUB_STEP_SUMMARY"

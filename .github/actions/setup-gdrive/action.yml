@@ -9,5 +9,7 @@ runs:
   steps:
     - name: Create credentials.json for Google Drive
       shell: bash
+      env:
+        CREDENTIALS: ${{ inputs.credentials }}
       run: |
-        echo "${{ inputs.credentials }}" | base64 --decode > credentials.json
+        echo "${CREDENTIALS}" | base64 --decode > credentials.json
