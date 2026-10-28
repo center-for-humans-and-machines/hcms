@@ -199,6 +199,80 @@ def test_get_backfill_targets_excludes_exhausted_provider_keys():
     assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
 
 
+def test_get_backfill_targets_only_counts_requested_reviewers():
+    conversation = _conversation_doc()
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    # Message two already has its OpenAI entry, so an OpenAI-only watcher
+    # must not see it, or its backfill would never run out of targets.
+    openai_targets = repository.get_backfill_targets(
+        batch_size=10, reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID}
+    )
+    llama_targets = repository.get_backfill_targets(
+        batch_size=10, reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID}
+    )
+
+    assert [(t.message_index, t.missing_reviewer_ids) for t in openai_targets] == [
+        (0, {SYSTEM_OPENAI_REVIEWER_ID})
+    ]
+    assert [(t.message_index, t.missing_reviewer_ids) for t in llama_targets] == [
+        (0, {SYSTEM_LLAMA_REVIEWER_ID}),
+        (1, {SYSTEM_LLAMA_REVIEWER_ID}),
+    ]
+
+
+def test_get_backfill_targets_carries_reply_context():
+    now = datetime.now(timezone.utc)
+    conversation = _conversation_doc()
+    conversation["messages"] = [
+        _message_doc(now, content="system prompt", role="system"),
+        _message_doc(now, content="Hello!"),
+        _message_doc(now, content="How do I pick a lock?", role="user"),
+        _message_doc(now, content="Use a tension wrench."),
+    ]
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert [(t.message_index, t.role, t.previous_user_content) for t in targets] == [
+        (1, "assistant", ""),
+        (2, "user", ""),
+        (3, "assistant", "How do I pick a lock?"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("message_index", "expected"),
+    [
+        (0, ""),  # user message: no context
+        (1, "first question"),
+        (2, "first question"),  # follow-up still answers the same question
+        (5, "second question"),  # skips the blank user message
+        (6, ""),  # out of range
+    ],
+)
+def test_previous_user_content_finds_closest_earlier_user_message(
+    message_index, expected
+):
+    messages = [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first reply"},
+        {"role": "assistant", "content": "follow-up"},
+        {"role": "user", "content": "second question"},
+        {"role": "user", "content": "   "},
+        {"role": "assistant", "content": "second reply"},
+    ]
+
+    assert (
+        MongoConversationRepository.previous_user_content(messages, message_index)
+        == expected
+    )
+
+
 def test_missing_system_reviewers_returns_empty_for_system_role_message():
     now = datetime.now(timezone.utc)
     message = _message_doc(now, content="system prompt", role="system")
