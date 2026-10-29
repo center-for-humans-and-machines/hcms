@@ -19,7 +19,7 @@ inputs:
   deployment-vars:
     description: Path to deployment variables YAML file
     required: false
-    default: /tmp/deployment_vars.yml
+    default: ""
   kubeconfig:
     description: Base64 encoded kubeconfig
     required: true
@@ -71,12 +71,12 @@ runs:
 
         # Install into the job's temp directory without sudo, so the step also
         # works on self-hosted runners whose user can't write /usr/local/bin.
+        # Later steps call it by full path rather than through GITHUB_PATH.
         helm_dir="${RUNNER_TEMP}/helm-bin"
         mkdir -p "$helm_dir"
         export PATH="${helm_dir}:${PATH}"
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
           HELM_INSTALL_DIR="$helm_dir" USE_SUDO=false bash
-        echo "$helm_dir" >> "$GITHUB_PATH"
 
     - name: Validate Helm chart files
       shell: bash
@@ -121,7 +121,7 @@ runs:
           helm_args+=(--values "${DEPLOYMENT_VARS}")
         fi
 
-        helm upgrade \
+        "${RUNNER_TEMP}/helm-bin/helm" upgrade \
           --install \
           --namespace "${NAMESPACE}" \
           --create-namespace \

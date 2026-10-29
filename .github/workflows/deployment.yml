@@ -230,7 +230,11 @@ jobs:
             exit 1
           }
 
-          cat > /tmp/deployment_vars.yml <<EOV
+          # Per-job temp dir, private to the runner user: on a shared
+          # self-hosted machine /tmp would leave these secrets readable by
+          # every account and let parallel jobs overwrite each other's file.
+          umask 077
+          cat > "${RUNNER_TEMP}/deployment_vars.yml" <<EOV
           deployment_vars:
             MODEL_API_KEY: "$MODEL_API_KEY"
             MODEL_ENDPOINT: "$MODEL_ENDPOINT"
@@ -265,7 +269,7 @@ jobs:
           image-name: ${{ steps.vars.outputs.full_image }}
           namespace: ${{ env.NAMESPACE }}
           replica-count: ${{ vars.WATCHER_REPLICA_COUNT || '1' }}
-          deployment-vars: /tmp/deployment_vars.yml
+          deployment-vars: ${{ runner.temp }}/deployment_vars.yml
           kubeconfig: ${{ secrets.KUBECONFIG }}
           dockercfg: ${{ secrets.DOCKERCFG }}
 
