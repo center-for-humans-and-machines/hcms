@@ -67,8 +67,13 @@ Required values:
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`
 - `OPENAI_MODERATION_API_KEY`
-- `LLAMA_GUARD_API_KEY`
-- `LLAMA_GUARD_ENDPOINT`
+
+Fixed value:
+
+- `HCMS_MODERATION_PROVIDERS` (`openai_moderation`): the deployed watcher only
+  writes OpenAI moderation ratings. Llama Guard runs in a separate watcher on
+  the GPU host, which the cluster can't reach (see the
+  [Llama Guard watcher ADR](./adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)).
 
 Provider-specific requirement:
 
@@ -93,7 +98,6 @@ Optional values with defaults:
 | `GITLAB_REGISTRY`             | Docker registry host                                                  |
 | `APP_NAME`                    | Application slug used in image/release naming (no `hpms-` prefix)     |
 | `APP_NAME_MSW`                | Application slug for MSW environment (elderbot-msw-2026 branch)       |
-| `LLAMA_GUARD_ENDPOINT`        | Llama Guard endpoint URL                                              |
 | `LANGFUSE_HOST`               | Langfuse base URL used for telemetry export                           |
 | `MODEL_ENDPOINT`              | Chat/completions provider endpoint used by watcher                    |
 | `BATCH_MODEL_NAME`            | Batch model name required by the monitoring configuration import path |
@@ -125,7 +129,6 @@ Optional variables:
 | `LANGFUSE_PUBLIC_KEY`       | Langfuse public API key used by watcher telemetry          |
 | `LANGFUSE_SECRET_KEY`       | Langfuse secret API key used by watcher telemetry          |
 | `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher                      |
-| `LLAMA_GUARD_API_KEY`       | Llama Guard API key used by watcher                        |
 
 ## Rename / migration note (Helm release name)
 
