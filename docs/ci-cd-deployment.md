@@ -27,7 +27,10 @@ Workflow triggers:
 
 ## Runner and Environment Model
 
-- All jobs run on `self-hosted` runners.
+- All jobs run on GitHub-hosted `ubuntu-latest` runners. The repository
+  variable `RUNNER` set to `self-hosted` moves them to our self-hosted runner;
+  keep it at `github-hosted`, because this repository is public and pull
+  requests from forks would run on that machine.
 - Global workflow environment:
   - `REGISTRY`: `${{ vars.GITLAB_REGISTRY }}`
   - `DOCKER_REGISTRY_PREFIX`: `${{ vars.DOCKER_REGISTRY_PREFIX || 'mpib/chm/common/base-images' }}`
@@ -43,7 +46,7 @@ The `watcher` service follows this flow:
 
 1. Resolve deterministic app/image naming (`hpms-watcher-<APP_NAME>-<branch>`).
 1. Build and push Docker image from `Dockerfile`.
-1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
+1. Generate `$RUNNER_TEMP/deployment_vars.yml` for runtime environment values.
 1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
 
 Naming note:
@@ -53,7 +56,7 @@ Naming note:
 
 ### Runtime deployment variables
 
-The workflow writes this contract into `/tmp/deployment_vars.yml`:
+The workflow writes this contract into `$RUNNER_TEMP/deployment_vars.yml`:
 
 Required values:
 
@@ -67,8 +70,13 @@ Required values:
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`
 - `OPENAI_MODERATION_API_KEY`
-- `LLAMA_GUARD_API_KEY`
-- `LLAMA_GUARD_ENDPOINT`
+
+Fixed value:
+
+- `HCMS_MODERATION_PROVIDERS` (`openai_moderation`): the deployed watcher only
+  writes OpenAI moderation ratings. Llama Guard runs in a separate watcher on
+  the GPU host, which the cluster can't reach (see the
+  [Llama Guard watcher ADR](./adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)).
 
 Provider-specific requirement:
 
@@ -93,7 +101,6 @@ Optional values with defaults:
 | `GITLAB_REGISTRY`             | Docker registry host                                                  |
 | `APP_NAME`                    | Application slug used in image/release naming (no `hpms-` prefix)     |
 | `APP_NAME_MSW`                | Application slug for MSW environment (elderbot-msw-2026 branch)       |
-| `LLAMA_GUARD_ENDPOINT`        | Llama Guard endpoint URL                                              |
 | `LANGFUSE_HOST`               | Langfuse base URL used for telemetry export                           |
 | `MODEL_ENDPOINT`              | Chat/completions provider endpoint used by watcher                    |
 | `BATCH_MODEL_NAME`            | Batch model name required by the monitoring configuration import path |
@@ -125,7 +132,6 @@ Optional variables:
 | `LANGFUSE_PUBLIC_KEY`       | Langfuse public API key used by watcher telemetry          |
 | `LANGFUSE_SECRET_KEY`       | Langfuse secret API key used by watcher telemetry          |
 | `OPENAI_MODERATION_API_KEY` | OpenAI moderation key used by watcher                      |
-| `LLAMA_GUARD_API_KEY`       | Llama Guard API key used by watcher                        |
 
 ## Rename / migration note (Helm release name)
 
@@ -147,7 +153,7 @@ Required chart values provided by workflow/action:
 - `dockersecret`
 - `replica_count`
 
-Runtime env values are passed through `deployment_vars` from `/tmp/deployment_vars.yml`.
+Runtime env values are passed through `deployment_vars` from `$RUNNER_TEMP/deployment_vars.yml`.
 
 ## Deployment Summary
 

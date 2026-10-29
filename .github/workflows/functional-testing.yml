@@ -19,7 +19,7 @@ env:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
