@@ -19,7 +19,7 @@ inputs:
   deployment-vars:
     description: Path to deployment variables YAML file
     required: false
-    default: /tmp/deployment_vars.yml
+    default: ""
   kubeconfig:
     description: Base64 encoded kubeconfig
     required: true

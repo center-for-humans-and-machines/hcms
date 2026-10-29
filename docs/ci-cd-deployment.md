@@ -46,7 +46,7 @@ The `watcher` service follows this flow:
 
 1. Resolve deterministic app/image naming (`hpms-watcher-<APP_NAME>-<branch>`).
 1. Build and push Docker image from `Dockerfile`.
-1. Generate `/tmp/deployment_vars.yml` for runtime environment values.
+1. Generate `$RUNNER_TEMP/deployment_vars.yml` for runtime environment values.
 1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
 
 Naming note:
@@ -56,7 +56,7 @@ Naming note:
 
 ### Runtime deployment variables
 
-The workflow writes this contract into `/tmp/deployment_vars.yml`:
+The workflow writes this contract into `$RUNNER_TEMP/deployment_vars.yml`:
 
 Required values:
 
@@ -153,7 +153,7 @@ Required chart values provided by workflow/action:
 - `dockersecret`
 - `replica_count`
 
-Runtime env values are passed through `deployment_vars` from `/tmp/deployment_vars.yml`.
+Runtime env values are passed through `deployment_vars` from `$RUNNER_TEMP/deployment_vars.yml`.
 
 ## Deployment Summary
 
