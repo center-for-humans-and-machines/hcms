@@ -27,7 +27,10 @@ Workflow triggers:
 
 ## Runner and Environment Model
 
-- All jobs run on `self-hosted` runners.
+- All jobs run on GitHub-hosted `ubuntu-latest` runners. The repository
+  variable `RUNNER` set to `self-hosted` moves them to our self-hosted runner;
+  keep it at `github-hosted`, because this repository is public and pull
+  requests from forks would run on that machine.
 - Global workflow environment:
   - `REGISTRY`: `${{ vars.GITLAB_REGISTRY }}`
   - `DOCKER_REGISTRY_PREFIX`: `${{ vars.DOCKER_REGISTRY_PREFIX || 'mpib/chm/common/base-images' }}`

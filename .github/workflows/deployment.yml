@@ -20,7 +20,7 @@ env:
 jobs:
   build-images:
     name: Build Image (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +105,7 @@ jobs:
 
   deploy-services:
     name: Deploy Service (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     needs: build-images
     if: needs.build-images.result == 'success'
     environment:
@@ -330,7 +330,7 @@ jobs:
 
   deployment-summary:
     name: Deployment Summary
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     needs: [build-images, deploy-services]
     if: ${{ !cancelled() }}
 
