@@ -20,7 +20,7 @@ env:
 jobs:
   build-images:
     name: Build Image (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +105,7 @@ jobs:
 
   deploy-services:
     name: Deploy Service (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     needs: build-images
     if: needs.build-images.result == 'success'
     environment:
@@ -153,8 +153,6 @@ jobs:
           MONGODB_DATABASE_MAIN: ${{ vars.MONGODB_DATABASE_MAIN }}
           MONGODB_DATABASE_MSW: ${{ vars.MONGODB_DATABASE_MSW }}
           OPENAI_MODERATION_API_KEY: ${{ secrets.OPENAI_MODERATION_API_KEY }}
-          LLAMA_GUARD_API_KEY: ${{ secrets.LLAMA_GUARD_API_KEY }}
-          LLAMA_GUARD_ENDPOINT: ${{ vars.LLAMA_GUARD_ENDPOINT }}
           MONGODB_COLLECTION: ${{ vars.MONGODB_COLLECTION || 'Conversations' }}
           MONGODB_CHANGE_STREAM_MAX_AWAIT_MS: ${{ vars.MONGODB_CHANGE_STREAM_MAX_AWAIT_MS || '1000' }}
           MONGODB_BACKFILL_BATCH_SIZE: ${{ vars.MONGODB_BACKFILL_BATCH_SIZE || '200' }}
@@ -231,16 +229,12 @@ jobs:
             echo "Missing OPENAI_MODERATION_API_KEY secret" >&2
             exit 1
           }
-          [[ -n "$LLAMA_GUARD_API_KEY" ]] || {
-            echo "Missing LLAMA_GUARD_API_KEY secret" >&2
-            exit 1
-          }
-          [[ -n "$LLAMA_GUARD_ENDPOINT" ]] || {
-            echo "Missing LLAMA_GUARD_ENDPOINT variable" >&2
-            exit 1
-          }
 
-          cat > /tmp/deployment_vars.yml <<EOV
+          # Per-job temp dir, private to the runner user: on a shared
+          # self-hosted machine /tmp would leave these secrets readable by
+          # every account and let parallel jobs overwrite each other's file.
+          umask 077
+          cat > "${RUNNER_TEMP}/deployment_vars.yml" <<EOV
           deployment_vars:
             MODEL_API_KEY: "$MODEL_API_KEY"
             MODEL_ENDPOINT: "$MODEL_ENDPOINT"
@@ -262,8 +256,9 @@ jobs:
             MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS: "$MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS"
             HCMS_LOG_LEVEL: "$HCMS_LOG_LEVEL"
             OPENAI_MODERATION_API_KEY: "$OPENAI_MODERATION_API_KEY"
-            LLAMA_GUARD_API_KEY: "$LLAMA_GUARD_API_KEY"
-            LLAMA_GUARD_ENDPOINT: "$LLAMA_GUARD_ENDPOINT"
+            # Llama Guard runs in a separate watcher next to its GPU, which
+            # the cluster can't reach; this one only writes OpenAI ratings.
+            HCMS_MODERATION_PROVIDERS: "openai_moderation"
           EOV
 
       - name: Deploy with Helm
@@ -274,7 +269,7 @@ jobs:
           image-name: ${{ steps.vars.outputs.full_image }}
           namespace: ${{ env.NAMESPACE }}
           replica-count: ${{ vars.WATCHER_REPLICA_COUNT || '1' }}
-          deployment-vars: /tmp/deployment_vars.yml
+          deployment-vars: ${{ runner.temp }}/deployment_vars.yml
           kubeconfig: ${{ secrets.KUBECONFIG }}
           dockercfg: ${{ secrets.DOCKERCFG }}
 
@@ -330,7 +325,7 @@ jobs:
 
   deployment-summary:
     name: Deployment Summary
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     needs: [build-images, deploy-services]
     if: ${{ !cancelled() }}
 

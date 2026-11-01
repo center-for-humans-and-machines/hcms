@@ -20,7 +20,7 @@ permissions: {}
 jobs:
   build:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
 
     permissions:
       contents: read

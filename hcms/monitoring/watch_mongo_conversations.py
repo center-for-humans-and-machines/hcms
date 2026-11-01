@@ -4,9 +4,19 @@
 
 import logging
 
-from hcms.database.repository import MongoConversationRepository
+from hcms.database.repository import (
+    SYSTEM_LLAMA_REVIEWER_ID,
+    SYSTEM_OPENAI_REVIEWER_ID,
+    MongoConversationRepository,
+)
 from hcms.monitoring.realtime_watcher import RealtimeConversationWatcher
 from hcms.utils import get_env_variable
+
+# Values accepted in HCMS_MODERATION_PROVIDERS, mapped to their reviewer IDs.
+MODERATION_PROVIDERS = {
+    "openai_moderation": SYSTEM_OPENAI_REVIEWER_ID,
+    "llama_guard": SYSTEM_LLAMA_REVIEWER_ID,
+}
 
 
 def _get_int_env(var_name: str, default_value: int) -> int:
@@ -21,9 +31,28 @@ def _get_float_env(var_name: str, default_value: float) -> float:
     return float(raw_value)
 
 
+def _get_reviewer_ids() -> set[str]:
+    """Read which providers this watcher runs from HCMS_MODERATION_PROVIDERS.
+
+    Comma-separated provider names (default: all). Run one watcher per provider
+    when they need different hosts, e.g. Llama Guard next to its GPU.
+    """
+    raw_value = get_env_variable(
+        "HCMS_MODERATION_PROVIDERS", default=",".join(MODERATION_PROVIDERS)
+    )
+    providers = {name.strip() for name in raw_value.split(",") if name.strip()}
+    unknown = providers - MODERATION_PROVIDERS.keys()
+    if not providers or unknown:
+        raise ValueError(
+            f"HCMS_MODERATION_PROVIDERS={raw_value!r}: expected a comma-separated "
+            f"list of {sorted(MODERATION_PROVIDERS)}"
+        )
+    return {MODERATION_PROVIDERS[name] for name in providers}
+
+
 def _configure_logging() -> None:
     """Configure basic logging for long-running watcher runtime."""
-    configured_level = get_env_variable("hcms_LOG_LEVEL", default="INFO").upper()
+    configured_level = get_env_variable("HCMS_LOG_LEVEL", default="INFO").upper()
     log_level = getattr(logging, configured_level, logging.INFO)
     logging.basicConfig(
         level=log_level,
@@ -32,7 +61,7 @@ def _configure_logging() -> None:
 
     if configured_level not in logging.getLevelNamesMapping():
         logging.getLogger(__name__).warning(
-            "Unknown hcms_LOG_LEVEL=%s; using INFO", configured_level
+            "Unknown HCMS_LOG_LEVEL=%s; using INFO", configured_level
         )
 
 
@@ -46,8 +75,14 @@ def main() -> None:
         collection_name=get_env_variable("MONGODB_COLLECTION", default="Conversations"),
     )
 
+    reviewer_ids = _get_reviewer_ids()
+    logging.getLogger(__name__).info(
+        "Moderation providers: %s", ", ".join(sorted(reviewer_ids))
+    )
+
     watcher = RealtimeConversationWatcher(
         repository=repository,
+        reviewer_ids=reviewer_ids,
         backfill_batch_size=_get_int_env("MONGODB_BACKFILL_BATCH_SIZE", 200),
         change_stream_max_await_ms=_get_int_env(
             "MONGODB_CHANGE_STREAM_MAX_AWAIT_MS", 1000

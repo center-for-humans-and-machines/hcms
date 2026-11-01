@@ -98,7 +98,7 @@ def test_startup_backfill_writes_both_system_flags(collection):
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "Hate",
+        llama_guard_rater=lambda _text, **_context: "Hate",
         backfill_retry_sleep_seconds=0.0,
     )
 
@@ -133,7 +133,7 @@ def test_change_event_writes_missing_system_flag(collection):
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "Hate",
+        llama_guard_rater=lambda _text, **_context: "Hate",
     )
 
     full_document = collection.find_one({"_id": document["_id"]})
@@ -157,7 +157,7 @@ def test_change_event_does_not_create_duplicate_provider_entries(collection):
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "Hate",
+        llama_guard_rater=lambda _text, **_context: "Hate",
     )
 
     stale_document = collection.find_one({"_id": document["_id"]})

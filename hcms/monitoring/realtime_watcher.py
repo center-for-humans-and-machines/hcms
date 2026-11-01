@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import random
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from pydantic import ValidationError
 
+from hcms.constants import ASSISTANT
 from hcms.database.models import ConversationDocument
 from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
+    SYSTEM_REVIEWER_IDS,
     MessageBackfillTarget,
     MongoConversationRepository,
 )
@@ -39,6 +42,9 @@ KNOWN_LLAMA_GUARD_CATEGORIES = {
 }
 
 ProviderRater = Callable[[str], Any]
+# Called as rater(content), or for assistant replies as
+# rater(content, role=..., previous_user_content=...).
+LlamaGuardRater = Callable[..., Any]
 ProviderResultMap = dict[str, bool]
 BackfillProviderKey = tuple[Any, int, str]
 
@@ -116,7 +122,7 @@ class RealtimeConversationWatcher:
         self,
         repository: MongoConversationRepository,
         openai_rater: Optional[ProviderRater] = None,
-        llama_guard_rater: Optional[ProviderRater] = None,
+        llama_guard_rater: Optional[LlamaGuardRater] = None,
         backfill_batch_size: int = 200,
         change_stream_max_await_ms: int = 1000,
         backfill_max_retries: int = 10,
@@ -125,10 +131,31 @@ class RealtimeConversationWatcher:
         reconnect_backoff_max_seconds: float = 30.0,
         reconnect_backoff_jitter_seconds: float = 0.25,
         summary_log_interval_events: int = 100,
+        reviewer_ids: Optional[Iterable[str]] = None,
     ) -> None:
         self.repository = repository
-        self.openai_rater = openai_rater or _get_default_openai_rater()
-        self.llama_guard_rater = llama_guard_rater or _get_default_llama_guard_rater()
+        # Providers this watcher rates and writes (default: all). Entries of
+        # other providers are left to the watchers that run them.
+        self.reviewer_ids = (
+            SYSTEM_REVIEWER_IDS if reviewer_ids is None else frozenset(reviewer_ids)
+        )
+        unknown_reviewer_ids = self.reviewer_ids - SYSTEM_REVIEWER_IDS
+        if not self.reviewer_ids or unknown_reviewer_ids:
+            raise ValueError(
+                f"reviewer_ids must be a non-empty subset of {sorted(SYSTEM_REVIEWER_IDS)},"
+                f" got {sorted(self.reviewer_ids)}"
+            )
+        # Resolve default raters only for enabled providers, so a watcher
+        # doesn't need a disabled provider's dependencies or credentials.
+        self.openai_rater = openai_rater
+        if self.openai_rater is None and SYSTEM_OPENAI_REVIEWER_ID in self.reviewer_ids:
+            self.openai_rater = _get_default_openai_rater()
+        self.llama_guard_rater = llama_guard_rater
+        if (
+            self.llama_guard_rater is None
+            and SYSTEM_LLAMA_REVIEWER_ID in self.reviewer_ids
+        ):
+            self.llama_guard_rater = _get_default_llama_guard_rater()
         self.backfill_batch_size = backfill_batch_size
         self.change_stream_max_await_ms = change_stream_max_await_ms
         self.backfill_max_retries = max(backfill_max_retries, 1)
@@ -206,6 +233,7 @@ class RealtimeConversationWatcher:
             targets = self.repository.get_backfill_targets(
                 batch_size=self.backfill_batch_size,
                 excluded_provider_keys=exhausted_provider_keys,
+                reviewer_ids=set(self.reviewer_ids),
             )
             if not targets:
                 self._unresolved_backfill_targets = len(unresolved_provider_keys)
@@ -237,6 +265,8 @@ class RealtimeConversationWatcher:
                     message_index=target.message_index,
                     content=target.content,
                     missing_reviewer_ids=eligible_reviewer_ids,
+                    role=target.role,
+                    previous_user_content=target.previous_user_content,
                 )
                 provider_results = self.process_message_target(eligible_target)
                 for reviewer_id in eligible_reviewer_ids:
@@ -316,7 +346,9 @@ class RealtimeConversationWatcher:
                 continue
             content = message["content"]
 
-            missing_reviewer_ids = self.repository.missing_system_reviewers(message)
+            missing_reviewer_ids = self.repository.missing_system_reviewers(
+                message, set(self.reviewer_ids)
+            )
             if not missing_reviewer_ids:
                 continue
 
@@ -325,6 +357,10 @@ class RealtimeConversationWatcher:
                 message_index=message_index,
                 content=content,
                 missing_reviewer_ids=missing_reviewer_ids,
+                role=message.get("role", ""),
+                previous_user_content=MongoConversationRepository.previous_user_content(
+                    messages, message_index
+                ),
             )
             self.process_message_target(target)
 
@@ -356,13 +392,14 @@ class RealtimeConversationWatcher:
     ) -> ProviderResultMap:
         """Rate one message and persist missing system reviewer flags."""
         provider_results: ProviderResultMap = {}
+        missing_reviewer_ids = target.missing_reviewer_ids & self.reviewer_ids
 
-        if SYSTEM_OPENAI_REVIEWER_ID in target.missing_reviewer_ids:
+        if SYSTEM_OPENAI_REVIEWER_ID in missing_reviewer_ids:
             provider_results[SYSTEM_OPENAI_REVIEWER_ID] = self._persist_openai_flag(
                 target
             )
 
-        if SYSTEM_LLAMA_REVIEWER_ID in target.missing_reviewer_ids:
+        if SYSTEM_LLAMA_REVIEWER_ID in missing_reviewer_ids:
             provider_results[SYSTEM_LLAMA_REVIEWER_ID] = self._persist_llama_guard_flag(
                 target
             )
@@ -371,6 +408,7 @@ class RealtimeConversationWatcher:
 
     def _persist_openai_flag(self, target: MessageBackfillTarget) -> bool:
         """Rate with OpenAI moderation and write into reviewer_flags."""
+        assert self.openai_rater is not None  # set whenever the provider is enabled
         return self._persist_provider_flag(
             target=target,
             reviewer_id=SYSTEM_OPENAI_REVIEWER_ID,
@@ -380,12 +418,27 @@ class RealtimeConversationWatcher:
         )
 
     def _persist_llama_guard_flag(self, target: MessageBackfillTarget) -> bool:
-        """Rate with Llama Guard and write into reviewer_flags."""
+        """Rate with Llama Guard and write into reviewer_flags.
+
+        Assistant replies are rated together with the user message they answer,
+        so Llama Guard applies its response policy instead of judging the reply
+        as if a user had written it.
+        """
+        assert (
+            self.llama_guard_rater is not None
+        )  # set whenever the provider is enabled
+        rater: ProviderRater = self.llama_guard_rater
+        if target.role == ASSISTANT:
+            rater = functools.partial(
+                self.llama_guard_rater,
+                role=ASSISTANT,
+                previous_user_content=target.previous_user_content,
+            )
         return self._persist_provider_flag(
             target=target,
             reviewer_id=SYSTEM_LLAMA_REVIEWER_ID,
             provider_name="Llama Guard",
-            rater=self.llama_guard_rater,
+            rater=rater,
             normalizer=normalize_llama_guard_categories,
         )
 

@@ -26,7 +26,7 @@ env:
 
 jobs:
   gen-data:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -92,7 +92,7 @@ jobs:
         if: ${{ !cancelled() }}
 
   eval-data:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
     needs: gen-data

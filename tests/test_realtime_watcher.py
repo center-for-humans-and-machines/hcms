@@ -54,8 +54,12 @@ class StubRepository(MongoConversationRepository):
         )
 
     @staticmethod
-    def missing_system_reviewers(message: dict[str, Any]):
-        return MongoConversationRepository.missing_system_reviewers(message)
+    def missing_system_reviewers(
+        message: dict[str, Any], reviewer_ids: set[str] | None = None
+    ):
+        return MongoConversationRepository.missing_system_reviewers(
+            message, reviewer_ids
+        )
 
     @staticmethod
     def validate_conversation_document(conversation: dict[str, Any]):
@@ -70,9 +74,11 @@ class StubRepository(MongoConversationRepository):
         self,
         batch_size: int = 200,
         excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
+        reviewer_ids: set[str] | None = None,
     ) -> list[MessageBackfillTarget]:
         _ = batch_size
         _ = excluded_provider_keys
+        _ = reviewer_ids
         if not self.backfill_batches:
             return []
         return self.backfill_batches.pop(0)
@@ -108,6 +114,7 @@ class FilteringStubRepository(StubRepository):
         self,
         batch_size: int = 200,
         excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
+        reviewer_ids: set[str] | None = None,
     ) -> list[MessageBackfillTarget]:
         excluded_provider_keys = excluded_provider_keys or set()
         eligible_targets: list[MessageBackfillTarget] = []
@@ -116,7 +123,8 @@ class FilteringStubRepository(StubRepository):
             remaining_reviewer_ids = {
                 reviewer_id
                 for reviewer_id in target.missing_reviewer_ids
-                if (
+                if (reviewer_ids is None or reviewer_id in reviewer_ids)
+                and (
                     target.document_id,
                     target.message_index,
                     reviewer_id,
@@ -309,7 +317,7 @@ def test_process_message_target_persists_both_provider_flags_when_missing():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "violence"],
-        llama_guard_rater=lambda _text: "Hate",
+        llama_guard_rater=lambda _text, **_context: "Hate",
     )
 
     document_id = ObjectId()
@@ -343,7 +351,7 @@ def test_handle_change_event_only_processes_messages_missing_system_flags():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
     )
 
     document_id = ObjectId()
@@ -407,7 +415,7 @@ def test_handle_change_event_skips_system_role_messages(
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
     )
 
     document_id = ObjectId()
@@ -433,7 +441,7 @@ def test_handle_change_event_processes_only_non_system_messages_in_mixed_convers
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
     )
 
     document_id = ObjectId()
@@ -462,7 +470,7 @@ def test_handle_change_event_skips_invalid_document_from_change_stream():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
     )
 
     document = _conversation_document(
@@ -497,7 +505,7 @@ def test_run_startup_backfill_processes_targets_until_empty():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0, "hate"],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
     )
 
     watcher.run_startup_backfill()
@@ -547,7 +555,7 @@ def test_run_startup_backfill_retries_transient_provider_failure():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=flaky_openai_rater,
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         backfill_retry_sleep_seconds=0.0,
     )
 
@@ -591,7 +599,7 @@ def test_run_startup_backfill_stops_after_retry_budget_exhausted():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=always_failing_openai,
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         backfill_max_retries=2,
         backfill_retry_sleep_seconds=0.0,
     )
@@ -662,7 +670,7 @@ def test_run_startup_backfill_skips_exhausted_keys_while_progress_continues():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=always_failing_openai,
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         backfill_max_retries=2,
         backfill_retry_sleep_seconds=0.0,
     )
@@ -708,7 +716,7 @@ def test_run_startup_backfill_batch_size_one_processes_later_targets_after_exhau
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=always_failing_openai,
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         backfill_batch_size=1,
         backfill_max_retries=1,
         backfill_retry_sleep_seconds=0.0,
@@ -738,7 +746,7 @@ def test_failure_is_retried_on_later_attempt():
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=flaky_openai_rater,
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
     )
 
     document_id = ObjectId()
@@ -779,7 +787,7 @@ def test_compute_reconnect_sleep_seconds_grows_and_caps(monkeypatch):
     watcher = RealtimeConversationWatcher(
         repository=StubRepository(),
         openai_rater=lambda _text: [0],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         reconnect_backoff_base_seconds=1.0,
         reconnect_backoff_max_seconds=4.0,
         reconnect_backoff_jitter_seconds=0.0,
@@ -799,7 +807,7 @@ def test_compute_reconnect_sleep_seconds_large_failure_number_is_capped(monkeypa
     watcher = RealtimeConversationWatcher(
         repository=StubRepository(),
         openai_rater=lambda _text: [0],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         reconnect_backoff_base_seconds=1.0,
         reconnect_backoff_max_seconds=30.0,
         reconnect_backoff_jitter_seconds=0.0,
@@ -839,7 +847,7 @@ def test_run_reconnects_after_stream_failure(monkeypatch):
     watcher = RealtimeConversationWatcher(
         repository=repository,
         openai_rater=lambda _text: [0],
-        llama_guard_rater=lambda _text: "0",
+        llama_guard_rater=lambda _text, **_context: "0",
         reconnect_backoff_base_seconds=1.0,
         reconnect_backoff_max_seconds=1.0,
         reconnect_backoff_jitter_seconds=0.0,
@@ -852,3 +860,124 @@ def test_run_reconnects_after_stream_failure(monkeypatch):
 
     assert sleeps == [1.0]
     assert repository.events == ["watch-opened"]
+
+
+def test_watcher_with_one_provider_only_writes_that_provider():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llama_guard_rater=lambda _text, **_context: "Hate",
+        reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+    )
+
+    target = MessageBackfillTarget(
+        document_id=ObjectId(),
+        message_index=0,
+        content="test",
+        missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID},
+    )
+    results = watcher.process_message_target(target)
+
+    # The OpenAI rater was never resolved, so no OpenAI credentials are needed.
+    assert watcher.openai_rater is None
+    assert results == {SYSTEM_LLAMA_REVIEWER_ID: True}
+    assert [call.reviewer_id for call in repository.calls] == [SYSTEM_LLAMA_REVIEWER_ID]
+
+
+@pytest.mark.parametrize("reviewer_ids", [set(), {"system_unknown"}])
+def test_watcher_rejects_invalid_reviewer_ids(reviewer_ids):
+    with pytest.raises(ValueError, match="reviewer_ids"):
+        RealtimeConversationWatcher(
+            repository=StubRepository(),
+            openai_rater=lambda _text: [0],
+            llama_guard_rater=lambda _text, **_context: "0",
+            reviewer_ids=reviewer_ids,
+        )
+
+
+def test_handle_change_event_ignores_other_providers_missing_entries():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0],
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+    )
+    openai_flag = {
+        "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+        "reviewer_by_username": SYSTEM_OPENAI_REVIEWER_ID,
+        "created_at": "2026-03-02T00:00:00Z",
+        "categories": [],
+        "category_other": "",
+        "comment": "",
+    }
+    event = {
+        "operationType": "insert",
+        "fullDocument": _conversation_document(
+            ObjectId(),
+            "conversation-openai-only",
+            # Missing only the Llama Guard entry, which this watcher doesn't run.
+            [_message("rated by OpenAI", [openai_flag])],
+        ),
+    }
+
+    watcher.handle_change_event(event)
+
+    assert repository.calls == []
+
+
+def test_llama_guard_rates_assistant_reply_with_its_user_message():
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def llama_guard_rater(text: str, **context: Any) -> str:
+        calls.append((text, context))
+        return "0"
+
+    watcher = RealtimeConversationWatcher(
+        repository=StubRepository(),
+        llama_guard_rater=llama_guard_rater,
+        reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+    )
+    event = {
+        "operationType": "insert",
+        "fullDocument": _conversation_document(
+            ObjectId(),
+            "conversation-reply-context",
+            [
+                _message("How do I pick a lock?", [], role="user"),
+                _message("Use a tension wrench.", []),
+            ],
+        ),
+    }
+
+    watcher.handle_change_event(event)
+
+    assert calls == [
+        ("How do I pick a lock?", {}),
+        (
+            "Use a tension wrench.",
+            {"role": "assistant", "previous_user_content": "How do I pick a lock?"},
+        ),
+    ]
+
+
+def test_run_startup_backfill_ends_when_only_other_providers_are_missing():
+    document_id = ObjectId()
+    repository = FilteringStubRepository(
+        targets=[
+            MessageBackfillTarget(
+                document_id=document_id,
+                message_index=0,
+                content="needs OpenAI only",
+                missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+            )
+        ]
+    )
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llama_guard_rater=lambda _text, **_context: "0",
+        reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID},
+    )
+
+    watcher.run_startup_backfill()
+
+    assert repository.calls == []

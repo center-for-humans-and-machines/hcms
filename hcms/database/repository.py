@@ -9,22 +9,31 @@ from typing import Any, Iterable, Optional, Set
 
 from pydantic import ValidationError
 
-from hcms.constants import SYSTEM
+from hcms.constants import ASSISTANT, SYSTEM, USER
 from hcms.database.models import ConversationDocument, MessageDocument
 
 SYSTEM_OPENAI_REVIEWER_ID = "system_openai_moderation"
 SYSTEM_LLAMA_REVIEWER_ID = "system_llama_guard"
+SYSTEM_REVIEWER_IDS: frozenset[str] = frozenset(
+    {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID}
+)
 LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class MessageBackfillTarget:
-    """Message that still requires one or more system moderation writes."""
+    """Message that still requires one or more system moderation writes.
+
+    For assistant messages, `previous_user_content` holds the user message the
+    reply answers, so raters can judge the reply in context.
+    """
 
     document_id: Any
     message_index: int
     content: str
     missing_reviewer_ids: Set[str]
+    role: str = ""
+    previous_user_content: str = ""
 
 
 class MongoConversationRepository:
@@ -80,8 +89,15 @@ class MongoConversationRepository:
         return validated.model_dump(by_alias=True)
 
     @staticmethod
-    def missing_system_reviewers(message: dict[str, Any]) -> Set[str]:
-        """Return system reviewer IDs that have not yet been persisted."""
+    def missing_system_reviewers(
+        message: dict[str, Any],
+        reviewer_ids: Optional[Set[str]] = None,
+    ) -> Set[str]:
+        """Return system reviewer IDs that have not yet been persisted.
+
+        Only `reviewer_ids` are considered (default: all system reviewers), so a
+        watcher running a subset of providers ignores the others' entries.
+        """
         if not MongoConversationRepository.is_message_eligible_for_system_reviewers(
             message
         ):
@@ -94,12 +110,36 @@ class MongoConversationRepository:
             if isinstance(flag, dict)
         }
 
-        missing: Set[str] = set()
-        if SYSTEM_OPENAI_REVIEWER_ID not in existing_reviewer_ids:
-            missing.add(SYSTEM_OPENAI_REVIEWER_ID)
-        if SYSTEM_LLAMA_REVIEWER_ID not in existing_reviewer_ids:
-            missing.add(SYSTEM_LLAMA_REVIEWER_ID)
-        return missing
+        expected_reviewer_ids = (
+            SYSTEM_REVIEWER_IDS if reviewer_ids is None else reviewer_ids
+        )
+        return {
+            reviewer_id
+            for reviewer_id in expected_reviewer_ids
+            if reviewer_id not in existing_reviewer_ids
+        }
+
+    @staticmethod
+    def previous_user_content(messages: list[Any], message_index: int) -> str:
+        """Return the user message an assistant reply answers, or "".
+
+        Only assistant messages get context: the closest earlier non-empty user
+        message. Other roles, and replies with no user message before them,
+        return "".
+        """
+        if not 0 <= message_index < len(messages):
+            return ""
+        message = messages[message_index]
+        if not isinstance(message, dict) or message.get("role") != ASSISTANT:
+            return ""
+
+        for earlier in reversed(messages[:message_index]):
+            if not isinstance(earlier, dict) or earlier.get("role") != USER:
+                continue
+            content = earlier.get("content", "")
+            if isinstance(content, str) and content.strip():
+                return content
+        return ""
 
     @staticmethod
     def is_message_eligible_for_system_reviewers(message: dict[str, Any]) -> bool:
@@ -118,8 +158,12 @@ class MongoConversationRepository:
         self,
         batch_size: int = 200,
         excluded_provider_keys: Optional[Set[tuple[Any, int, str]]] = None,
+        reviewer_ids: Optional[Set[str]] = None,
     ) -> list[MessageBackfillTarget]:
-        """Find messages that still need one or both system moderation writes."""
+        """Find messages that still need one or both system moderation writes.
+
+        Only `reviewer_ids` count as missing (default: all system reviewers).
+        """
         targets: list[MessageBackfillTarget] = []
         excluded_provider_keys = excluded_provider_keys or set()
 
@@ -161,7 +205,7 @@ class MongoConversationRepository:
                     continue
                 content = message["content"]
 
-                missing = self.missing_system_reviewers(message)
+                missing = self.missing_system_reviewers(message, reviewer_ids)
                 missing = {
                     reviewer_id
                     for reviewer_id in missing
@@ -177,6 +221,10 @@ class MongoConversationRepository:
                         message_index=message_index,
                         content=content,
                         missing_reviewer_ids=missing,
+                        role=message.get("role", ""),
+                        previous_user_content=self.previous_user_content(
+                            messages, message_index
+                        ),
                     )
                 )
                 if len(targets) >= batch_size:

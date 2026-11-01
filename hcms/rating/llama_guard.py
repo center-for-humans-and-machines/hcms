@@ -1,17 +1,40 @@
 """Evaluate conversations using Llama Guard."""
 
+import json
 from pathlib import Path
 
 import polars as pl
 from openai import OpenAI
 
+from hcms.constants import ASSISTANT, USER
 from hcms.loading.constants import DATASET_DIR
 from hcms.utils import get_env_variable
 from hcms.utils.cache import get_cached_result, save_cached_result
 from hcms.utils.moderation import RatingConfig, _rate_and_save_conversations
 
 
-def _rate_text_with_llama_guard(content: str) -> str:
+def _llama_guard_messages(
+    content: str, role: str, previous_user_content: str
+) -> list[dict[str, str]]:
+    """Build the conversation Llama Guard classifies.
+
+    An assistant reply that follows a user message is sent as that user/assistant
+    pair, so Llama Guard rates the reply (its last turn) in context. Everything
+    else, including a reply with no user message before it (Llama Guard's chat
+    template requires the conversation to start with a user turn), is sent alone
+    as a user message.
+    """
+    if role == ASSISTANT and previous_user_content.strip():
+        return [
+            {"role": USER, "content": previous_user_content.strip()},
+            {"role": ASSISTANT, "content": content.strip()},
+        ]
+    return [{"role": USER, "content": content.strip()}]
+
+
+def _rate_text_with_llama_guard(
+    content: str, role: str = USER, previous_user_content: str = ""
+) -> str:
     """Evaluates text content for safety using the Llama Guard model.
 
     This function sends the provided text to the Llama Guard model for evaluation.
@@ -25,6 +48,11 @@ def _rate_text_with_llama_guard(content: str) -> str:
 
     Args:
         content (str): The text content to be evaluated.
+        role (str): Role of the message's author. For `assistant`, pass the
+            user message it answers as `previous_user_content` so the reply is
+            rated in context.
+        previous_user_content (str): The user message an assistant reply
+            answers. Ignored for other roles.
 
     Returns:
         str: A string indicating the safety evaluation result.
@@ -35,8 +63,16 @@ def _rate_text_with_llama_guard(content: str) -> str:
     if not content:
         return ""
 
+    messages = _llama_guard_messages(content, role, previous_user_content)
+    # Single user messages keep their original cache key; replies rated in
+    # context are cached under the whole conversation instead.
+    if len(messages) == 1:
+        cache_key, cache_name = content, "llama_guard"
+    else:
+        cache_key, cache_name = json.dumps(messages), "llama_guard_response"
+
     # Check cache first
-    cached_result = get_cached_result(content, "llama_guard")
+    cached_result = get_cached_result(cache_key, cache_name)
     if cached_result is not None:
         return cached_result
 
@@ -64,12 +100,7 @@ def _rate_text_with_llama_guard(content: str) -> str:
     client = OpenAI(**client_kwargs)
     response = client.chat.completions.create(
         model="meta-llama/Llama-Guard-4-12B",
-        messages=[
-            {
-                "role": "user",
-                "content": content.strip(),
-            },
-        ],
+        messages=messages,  # type: ignore[arg-type]
     )
     rating = response.choices[0].message.content.strip()
 
@@ -85,7 +116,7 @@ def _rate_text_with_llama_guard(content: str) -> str:
         res = rating
 
     # Save to cache
-    save_cached_result(content, res, "llama_guard")
+    save_cached_result(cache_key, res, cache_name)
 
     return res
 
