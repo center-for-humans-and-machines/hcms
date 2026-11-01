@@ -2049,14 +2049,14 @@ files = [
 
 [[package]]
 name = "langfuse"
-version = "4.17.0"
+version = "5.0.4"
 description = "Langfuse Python SDK - LLM observability/tracing, datasets, experiments, LLM-as-a-judge evaluation, and prompt management"
 optional = false
-python-versions = "<4.0,>=3.10"
+python-versions = "<4.0,>=3.11"
 groups = ["main"]
 files = [
-    {file = "langfuse-4.17.0-py3-none-any.whl", hash = "sha256:02560e12d715dd24f239c240886ee197b9e62f4a808f06de77193356c56bf57a"},
-    {file = "langfuse-4.17.0.tar.gz", hash = "sha256:f8cccfc49d9839969e962ffb88ce49cf531a8cbf31507eb99e43668fb5b3b5da"},
+    {file = "langfuse-5.0.4-py3-none-any.whl", hash = "sha256:6ab4ddcbc4b33efbd9c7f5feb405bfb0060949e7a170f7410f8fcc52984887a7"},
+    {file = "langfuse-5.0.4.tar.gz", hash = "sha256:f9f13a7a0bf0aad4d75287411cece3172c717d9440e73b4b84255ffffb549c31"},
 ]
 
 [package.dependencies]
@@ -5473,4 +5473,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "4664dc1064df325b1b9268d9d86e0530fe119d3383bd8fedfe47da3e9da23a28"
+content-hash = "fc38dc3943ba92bae4e1848b4aa5a4d0913d3e1fa85ea854b19bd905dc5268c7"
