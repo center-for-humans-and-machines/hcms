@@ -28,7 +28,9 @@ class RegTestPrompt(BaseModel):
     Question: str = Field(..., min_length=1)
     Title: str = Field(..., min_length=1)
     Situation: str = Field(..., min_length=1)
-    Ideal_Response: str = Field(..., min_length=1)
+    # The CSV header spells this column "Ideal Response"; the alias accepts
+    # that spelling while validated frames expose ``Ideal_Response``.
+    Ideal_Response: str = Field(..., alias="Ideal Response", min_length=1)
 
 
 class ConversationMessage(BaseModel):
