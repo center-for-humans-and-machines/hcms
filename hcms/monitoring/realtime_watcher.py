@@ -455,9 +455,24 @@ class RealtimeConversationWatcher:
         holds_queue_slot: bool,
     ) -> None:
         queued_target = dataclasses.replace(target, missing_reviewer_ids=reviewer_ids)
-        future = self._get_executor().submit(
-            self._process_queued_target, queued_target, keys, holds_queue_slot
-        )
+        try:
+            future = self._get_executor().submit(
+                self._process_queued_target, queued_target, keys, holds_queue_slot
+            )
+        except RuntimeError:
+            # The executor was shut down underneath us; give the keys back so
+            # a restart's backfill picks the message up.
+            with self._lock:
+                self._in_flight.difference_update(keys)
+            if holds_queue_slot:
+                self._queue_slots.release()
+            LOGGER.error(
+                "Watcher is shutting down; dropped rating of document_id=%s "
+                "message_index=%s",
+                target.document_id,
+                target.message_index,
+            )
+            return
         with self._lock:
             self._pending_futures.add(future)
         future.add_done_callback(self._discard_pending_future)
@@ -471,16 +486,15 @@ class RealtimeConversationWatcher:
         """Worker-thread body: rate one message, then free its keys and queue slot.
 
         A provider that failed while a change event for it was skipped is
-        queued once more. Retries take no queue slot: a worker waiting for one
-        could deadlock with the queued work it is needed for, and each retry
-        is bounded by the skipped event that requested it.
+        queued once more. The retry inherits this task's queue slot, so the
+        queue bound holds and no worker ever waits for a slot (which could
+        deadlock with the queued work it is needed for). Each retry is bounded
+        by the skipped event that requested it.
         """
         provider_results: ProviderResultMap = {}
         try:
             provider_results = self.process_message_target(target)
         finally:
-            if holds_queue_slot:
-                self._queue_slots.release()
             with self._lock:
                 self._in_flight.difference_update(keys)
                 retry_keys = {
@@ -502,8 +516,10 @@ class RealtimeConversationWatcher:
                     target,
                     {key[2] for key in retry_keys},
                     retry_keys,
-                    holds_queue_slot=False,
+                    holds_queue_slot=holds_queue_slot,
                 )
+            elif holds_queue_slot:
+                self._queue_slots.release()
 
     def _discard_pending_future(self, future: Future[None]) -> None:
         with self._lock:
@@ -524,17 +540,32 @@ class RealtimeConversationWatcher:
             )
         return self._executor
 
-    def wait_for_pending(self, timeout: Optional[float] = None) -> None:
-        """Block until ratings queued from change events have finished."""
-        with self._lock:
-            pending = list(self._pending_futures)
-        concurrent.futures.wait(pending, timeout=timeout)
+    def wait_for_pending(self, timeout: Optional[float] = None) -> bool:
+        """Block until queued ratings, and the retries they queue, have finished.
+
+        Returns:
+            bool: True once nothing is pending, False if `timeout` ran out first.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            with self._lock:
+                pending = [f for f in self._pending_futures if not f.done()]
+            if not pending:
+                return True
+            remaining = (
+                None if deadline is None else max(deadline - time.monotonic(), 0.0)
+            )
+            if remaining == 0.0:
+                return False
+            concurrent.futures.wait(pending, timeout=remaining)
 
     def shutdown(self) -> None:
-        """Finish queued ratings and stop the worker threads."""
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
-            self._executor = None
+        """Finish queued ratings, retries included, then stop the worker threads."""
+        if self._executor is None:
+            return
+        self.wait_for_pending()
+        self._executor.shutdown(wait=True)
+        self._executor = None
 
     def _validate_full_document(
         self, full_document: dict[str, Any]

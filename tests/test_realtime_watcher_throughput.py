@@ -275,8 +275,7 @@ def test_failed_in_flight_rating_is_retried_when_its_event_was_skipped():
     assert llama_calls == ["hello"]
 
     llama_release.set()
-    watcher.wait_for_pending(timeout=5)
-    watcher.wait_for_pending(timeout=5)  # the retry was queued by the first task
+    assert watcher.wait_for_pending(timeout=5)  # follows the queued retry too
     watcher.shutdown()
 
     assert llama_calls == ["hello", "hello"]
@@ -307,3 +306,118 @@ def test_rating_lag_includes_the_database_write():
     watcher.handle_change_event(event)
 
     assert watcher._lag_max_seconds >= 0.05
+
+
+def _retry_scenario(llama_guard_rater):
+    """Build a watcher plus the two events that make a failed rating retry."""
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=llama_guard_rater,
+        worker_threads=2,
+    )
+    document_id = ObjectId()
+    openai_rated = _message(
+        "hello",
+        [
+            {
+                "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+                "reviewer_by_username": SYSTEM_OPENAI_REVIEWER_ID,
+                "created_at": "2026-03-02T00:00:00Z",
+                "categories": [],
+                "category_other": "",
+                "comment": "",
+            }
+        ],
+    )
+    first_event = {
+        "operationType": "insert",
+        "fullDocument": _conversation_document(
+            document_id, "c-retry", [_message("hello", [])]
+        ),
+    }
+    skipped_event = {
+        "operationType": "update",
+        "updateDescription": {"updatedFields": {"messages": [openai_rated]}},
+        "fullDocument": _conversation_document(document_id, "c-retry", [openai_rated]),
+    }
+    return watcher, repository, first_event, skipped_event
+
+
+def test_retry_keeps_the_queue_slot_of_the_task_it_replaces():
+    llama_started = threading.Event()
+    llama_release = threading.Event()
+    llama_calls: list[str] = []
+
+    def llama_guard_rater(text: str, **_context):
+        llama_calls.append(text)
+        if len(llama_calls) == 1:
+            llama_started.set()
+            assert llama_release.wait(timeout=5)
+            raise RuntimeError("provider down")
+        return "0"
+
+    watcher, _repository, first_event, skipped_event = _retry_scenario(
+        llama_guard_rater
+    )
+    slots = watcher.worker_threads * 2
+
+    watcher.handle_change_event(first_event)
+    assert llama_started.wait(timeout=5)
+    watcher.handle_change_event(skipped_event)
+    assert watcher._queue_slots._value == slots - 1  # the task holds its slot
+    llama_release.set()
+    assert watcher.wait_for_pending(timeout=5)
+    watcher.shutdown()
+
+    assert llama_calls == ["hello", "hello"]
+    assert watcher._queue_slots._value == slots  # released once, by the retry
+
+
+def test_shutdown_drains_a_retry_queued_while_it_waits():
+    llama_started = threading.Event()
+    llama_calls: list[str] = []
+
+    def llama_guard_rater(text: str, **_context):
+        llama_calls.append(text)
+        if len(llama_calls) == 1:
+            llama_started.set()
+            time.sleep(0.2)  # shutdown() is called while this rating runs
+            raise RuntimeError("provider down")
+        return "0"
+
+    watcher, repository, first_event, skipped_event = _retry_scenario(llama_guard_rater)
+
+    watcher.handle_change_event(first_event)
+    assert llama_started.wait(timeout=5)
+    watcher.handle_change_event(skipped_event)
+    watcher.shutdown()
+
+    assert llama_calls == ["hello", "hello"]
+    assert sorted(call.reviewer_id for call in repository.calls) == sorted(
+        [SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID]
+    )
+    assert not watcher._in_flight
+    assert not watcher._pending_futures
+
+
+def test_wait_for_pending_reports_timeout():
+    release = threading.Event()
+
+    def openai_rater(_text: str):
+        assert release.wait(timeout=5)
+        return [0]
+
+    watcher = RealtimeConversationWatcher(
+        repository=StubRepository(),
+        openai_rater=openai_rater,
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+        worker_threads=2,
+    )
+    watcher.handle_change_event(_insert_event("c-timeout", [_message("slow", [])]))
+
+    assert watcher.wait_for_pending(timeout=0.05) is False
+    release.set()
+    assert watcher.wait_for_pending(timeout=5) is True
+    watcher.shutdown()
