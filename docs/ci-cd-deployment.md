@@ -6,7 +6,7 @@ This repository deploys the monitoring `watcher` service through GitHub Actions 
 
 - Workflow: [`../.github/workflows/deployment.yml`](../.github/workflows/deployment.yml)
 - Composite action (vars): [`../.github/actions/resolve-service-vars/action.yml`](../.github/actions/resolve-service-vars/action.yml)
-- Composite action (deploy): [`../.github/actions/deploy-helm/action.yml`](../.github/actions/deploy-helm/action.yml)
+- Composite action (deploy): shared [`deploy-helm`](https://github.com/center-for-humans-and-machines/github-actions/tree/main/deploy-helm)
 - Helm chart: [`../kubernetes/worker-service`](../kubernetes/worker-service)
 
 The workflow builds the `watcher` image, deploys it only if the build succeeds,
@@ -47,7 +47,7 @@ The `watcher` service follows this flow:
 1. Resolve deterministic app/image naming (`hpms-watcher-<APP_NAME>-<branch>`).
 1. Build and push Docker image from `Dockerfile`.
 1. Generate `$RUNNER_TEMP/deployment_vars.yml` for runtime environment values.
-1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
+1. Deploy with the shared `deploy-helm` composite action only when the build job succeeds.
 
 Naming note:
 

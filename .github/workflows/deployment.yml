@@ -263,10 +263,11 @@ jobs:
 
       - name: Deploy with Helm
         id: deploy
-        uses: ./.github/actions/deploy-helm # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
+        uses: center-for-humans-and-machines/github-actions/deploy-helm@4f961d7426d6969474be67c43c1b48579c717ecd # v1.1.0
         with:
           app-name: ${{ steps.vars.outputs.app_name }}
           image-name: ${{ steps.vars.outputs.full_image }}
+          chart-dir: kubernetes/worker-service
           namespace: ${{ env.NAMESPACE }}
           replica-count: ${{ vars.WATCHER_REPLICA_COUNT || '1' }}
           deployment-vars: ${{ runner.temp }}/deployment_vars.yml
