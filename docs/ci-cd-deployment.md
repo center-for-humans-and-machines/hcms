@@ -94,6 +94,11 @@ Optional values with defaults:
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS` (`0.25`)
 - `HCMS_LOG_LEVEL` (`INFO`)
 
+Read by the watcher with built-in defaults (the workflow does not set them yet):
+
+- `HCMS_PROVIDER_TIMEOUT_SECONDS` (`30`)
+- `HCMS_PROVIDER_MAX_RETRIES` (`2`)
+
 ## Required GitHub Variables
 
 | Variable                      | Purpose                                                               |

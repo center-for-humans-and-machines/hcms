@@ -88,6 +88,8 @@ Watcher runtime behavior:
   provider can run on different hosts.
 - Assistant replies are rated by Llama Guard together with the user message
   they answer; user messages are rated on their own.
+- Provider calls time out after `HCMS_PROVIDER_TIMEOUT_SECONDS` (default `30`)
+  per attempt and are retried `HCMS_PROVIDER_MAX_RETRIES` times (default `2`).
 
 Main tuning variables (set in `.env`):
 
@@ -100,6 +102,8 @@ Main tuning variables (set in `.env`):
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS`
 - `HCMS_LOG_LEVEL`
 - `HCMS_MODERATION_PROVIDERS`
+- `HCMS_PROVIDER_TIMEOUT_SECONDS`
+- `HCMS_PROVIDER_MAX_RETRIES`
 
 Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
 
