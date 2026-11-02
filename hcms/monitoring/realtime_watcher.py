@@ -635,7 +635,8 @@ class RealtimeConversationWatcher:
             )
             with self._lock:
                 self._provider_success_counts[reviewer_id] += 1
-            self._record_rating_lag(target, provider_name, rated_at)
+            # Lag counts the write too: the rating is late until it is stored.
+            self._record_rating_lag(target, provider_name, datetime.now(timezone.utc))
             return True
         except Exception:  # pylint: disable=broad-exception-caught
             # pragma: no cover - network/runtime path
@@ -650,19 +651,20 @@ class RealtimeConversationWatcher:
             return False
 
     def _record_rating_lag(
-        self, target: MessageBackfillTarget, provider_name: str, rated_at: datetime
+        self, target: MessageBackfillTarget, provider_name: str, stored_at: datetime
     ) -> None:
-        """Track how long after a message was written its rating landed.
+        """Track how long after a message was written its rating was stored.
 
         The lag is the end-to-end delay a dashboard user sees: it includes time
-        spent waiting in the change stream, not only the provider call.
+        spent waiting in the change stream and writing to MongoDB, not only the
+        provider call.
         """
         if target.message_timestamp is None:
             return
         message_time = target.message_timestamp
         if message_time.tzinfo is None:
             message_time = message_time.replace(tzinfo=timezone.utc)
-        lag_seconds = max((rated_at - message_time).total_seconds(), 0.0)
+        lag_seconds = max((stored_at - message_time).total_seconds(), 0.0)
 
         with self._lock:
             self._lag_count += 1

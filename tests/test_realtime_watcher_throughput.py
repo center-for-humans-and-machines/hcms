@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
@@ -284,3 +285,25 @@ def test_failed_in_flight_rating_is_retried_when_its_event_was_skipped():
     )
     assert not watcher._in_flight
     assert not watcher._retry_requested
+
+
+class _SlowWriteRepository(StubRepository):
+    """Stub repository whose writes take a measurable amount of time."""
+
+    def upsert_system_reviewer_flag(self, *args, **kwargs):
+        time.sleep(0.05)
+        super().upsert_system_reviewer_flag(*args, **kwargs)
+
+
+def test_rating_lag_includes_the_database_write():
+    watcher = RealtimeConversationWatcher(
+        repository=_SlowWriteRepository(),
+        openai_rater=lambda _text: [0],
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+        rating_lag_warn_seconds=0.0,
+    )
+    event = _insert_event("conversation-write-lag", [_stale_message("now", 0.0)])
+
+    watcher.handle_change_event(event)
+
+    assert watcher._lag_max_seconds >= 0.05
