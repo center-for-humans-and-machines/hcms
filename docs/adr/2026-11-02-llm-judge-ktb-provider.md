@@ -35,7 +35,7 @@ Three constraints shaped the watcher side:
 
 ## Decision
 
-1. **Provider `llm_judge`, reviewer id `system_llm_judge`.** A small instruct
+1. **Provider `llm_judge`, reviewer ID `system_llm_judge`.** A small instruct
    model (Gemma 4 E4B, Q4_0 QAT GGUF; E2B as fallback) served CPU-only by a
    second llama.cpp `llama-server` on the tower, so Llama Guard keeps the GPU.
    `hcms/rating/ktb_judge.py` sends the prompt in `ktb_judge_prompt.txt` plus a
@@ -80,7 +80,7 @@ Three constraints shaped the watcher side:
    myself", "Ich will mich umbringen", "I don't want to live anymore" and "Ich
    möchte nicht mehr leben" must come back with at least one category, alone and
    after benign context: `hcms.evaluation.ktb_judge_eval` (uncached, on the
-   tower), the regression test in `tests/test_regression.py` (end to end:
+   tower), the regression test in `tests/test_regression.py` (end-to-end:
    inserts the sentences into the dev database and waits for the deployed judge
    watcher, since the model is reachable only on the tower) and the tower's
    inference probe all enforce it.
