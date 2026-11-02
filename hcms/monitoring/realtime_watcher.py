@@ -187,6 +187,10 @@ class RealtimeConversationWatcher:
         # Provider keys queued or being rated by worker threads, so a change
         # event that arrives again while a rating is in flight is not rated twice.
         self._in_flight: set[BackfillProviderKey] = set()
+        # In-flight keys whose change event arrived again meanwhile. If their
+        # rating fails, that event is honoured with one more attempt, as serial
+        # processing would have retried on it.
+        self._retry_requested: set[BackfillProviderKey] = set()
         self._pending_futures: set[Future[None]] = set()
         # Bounds the queue in front of the workers; the change stream cursor
         # keeps the rest of the backlog server-side.
@@ -415,20 +419,22 @@ class RealtimeConversationWatcher:
         With worker threads, providers already queued or in flight for the same
         message are skipped, so a change event that arrives again before the
         first rating lands (the watcher's own write, another provider's write)
-        does not rate it twice. Blocks when the queue in front of the workers
-        is full, so the backlog stays in the change stream.
+        does not rate it twice. Should that rating then fail, the skipped event
+        earns it one more attempt. Blocks when the queue in front of the
+        workers is full, so the backlog stays in the change stream.
         """
         if self.worker_threads == 1:
             self.process_message_target(target)
             return
 
         with self._lock:
-            reviewer_ids = {
-                reviewer_id
-                for reviewer_id in target.missing_reviewer_ids
-                if (target.document_id, target.message_index, reviewer_id)
-                not in self._in_flight
-            }
+            reviewer_ids: set[str] = set()
+            for reviewer_id in target.missing_reviewer_ids:
+                key = (target.document_id, target.message_index, reviewer_id)
+                if key in self._in_flight:
+                    self._retry_requested.add(key)
+                else:
+                    reviewer_ids.add(reviewer_id)
             if not reviewer_ids:
                 return
             keys = {
@@ -437,26 +443,67 @@ class RealtimeConversationWatcher:
             }
             self._in_flight.update(keys)
 
-        queued_target = dataclasses.replace(target, missing_reviewer_ids=reviewer_ids)
         # Released by the worker thread, so a `with` block does not fit here.
         self._queue_slots.acquire()  # pylint: disable=consider-using-with
+        self._submit_queued_target(target, reviewer_ids, keys, holds_queue_slot=True)
+
+    def _submit_queued_target(
+        self,
+        target: MessageBackfillTarget,
+        reviewer_ids: set[str],
+        keys: set[BackfillProviderKey],
+        holds_queue_slot: bool,
+    ) -> None:
+        queued_target = dataclasses.replace(target, missing_reviewer_ids=reviewer_ids)
         future = self._get_executor().submit(
-            self._process_queued_target, queued_target, keys
+            self._process_queued_target, queued_target, keys, holds_queue_slot
         )
         with self._lock:
             self._pending_futures.add(future)
         future.add_done_callback(self._discard_pending_future)
 
     def _process_queued_target(
-        self, target: MessageBackfillTarget, keys: set[BackfillProviderKey]
+        self,
+        target: MessageBackfillTarget,
+        keys: set[BackfillProviderKey],
+        holds_queue_slot: bool,
     ) -> None:
-        """Worker-thread body: rate one message, then free its keys and queue slot."""
+        """Worker-thread body: rate one message, then free its keys and queue slot.
+
+        A provider that failed while a change event for it was skipped is
+        queued once more. Retries take no queue slot: a worker waiting for one
+        could deadlock with the queued work it is needed for, and each retry
+        is bounded by the skipped event that requested it.
+        """
+        provider_results: ProviderResultMap = {}
         try:
-            self.process_message_target(target)
+            provider_results = self.process_message_target(target)
         finally:
+            if holds_queue_slot:
+                self._queue_slots.release()
             with self._lock:
                 self._in_flight.difference_update(keys)
-            self._queue_slots.release()
+                retry_keys = {
+                    key
+                    for key in keys & self._retry_requested
+                    if not provider_results.get(key[2], False)
+                }
+                self._retry_requested.difference_update(keys)
+                self._in_flight.update(retry_keys)
+            if retry_keys:
+                LOGGER.info(
+                    "Retrying %d failed rating(s) for document_id=%s message_index=%s "
+                    "requested by a change event received meanwhile",
+                    len(retry_keys),
+                    target.document_id,
+                    target.message_index,
+                )
+                self._submit_queued_target(
+                    target,
+                    {key[2] for key in retry_keys},
+                    retry_keys,
+                    holds_queue_slot=False,
+                )
 
     def _discard_pending_future(self, future: Future[None]) -> None:
         with self._lock:

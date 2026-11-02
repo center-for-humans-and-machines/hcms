@@ -10,7 +10,11 @@ from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 
-from hcms.database.repository import SYSTEM_OPENAI_REVIEWER_ID, MessageBackfillTarget
+from hcms.database.repository import (
+    SYSTEM_LLAMA_REVIEWER_ID,
+    SYSTEM_OPENAI_REVIEWER_ID,
+    MessageBackfillTarget,
+)
 from hcms.monitoring.realtime_watcher import RealtimeConversationWatcher
 from tests.test_realtime_watcher import (
     StubRepository,
@@ -207,3 +211,76 @@ def test_shutdown_without_worker_threads_is_a_no_op():
 
     watcher.wait_for_pending(timeout=0)
     watcher.shutdown()
+
+
+def test_failed_in_flight_rating_is_retried_when_its_event_was_skipped():
+    """Codex review on PR 92: with workers, OpenAI's write event arrives while
+    Llama Guard is still running for the same message. The event is skipped as
+    in flight; if Llama Guard then fails, it must still get the retry that
+    serial processing would have made on that event."""
+    repository = StubRepository()
+    llama_started = threading.Event()
+    llama_release = threading.Event()
+    llama_calls: list[str] = []
+
+    def llama_guard_rater(text: str, **_context):
+        llama_calls.append(text)
+        if len(llama_calls) == 1:
+            llama_started.set()
+            assert llama_release.wait(timeout=5)
+            raise RuntimeError("provider down")
+        return "0"
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=llama_guard_rater,
+        worker_threads=2,
+    )
+    document_id = ObjectId()
+    unrated = _message("hello", [])
+    watcher.handle_change_event(
+        {
+            "operationType": "insert",
+            "fullDocument": _conversation_document(document_id, "c-retry", [unrated]),
+        }
+    )
+    assert llama_started.wait(timeout=5)
+
+    # OpenAI's flag landed and its write produced a change event; Llama Guard
+    # is still in flight, so this event is skipped.
+    openai_rated = _message(
+        "hello",
+        [
+            {
+                "reviewer_id": SYSTEM_OPENAI_REVIEWER_ID,
+                "reviewer_by_username": SYSTEM_OPENAI_REVIEWER_ID,
+                "created_at": "2026-03-02T00:00:00Z",
+                "categories": [],
+                "category_other": "",
+                "comment": "",
+            }
+        ],
+    )
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {"updatedFields": {"messages": [openai_rated]}},
+            "fullDocument": _conversation_document(
+                document_id, "c-retry", [openai_rated]
+            ),
+        }
+    )
+    assert llama_calls == ["hello"]
+
+    llama_release.set()
+    watcher.wait_for_pending(timeout=5)
+    watcher.wait_for_pending(timeout=5)  # the retry was queued by the first task
+    watcher.shutdown()
+
+    assert llama_calls == ["hello", "hello"]
+    assert sorted(call.reviewer_id for call in repository.calls) == sorted(
+        [SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID]
+    )
+    assert not watcher._in_flight
+    assert not watcher._retry_requested
