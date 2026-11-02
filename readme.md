@@ -88,8 +88,13 @@ Watcher runtime behavior:
   provider can run on different hosts.
 - Assistant replies are rated by Llama Guard together with the user message
   they answer; user messages are rated on their own.
+- Messages are rated on `HCMS_WORKER_THREADS` threads (default `4`). A message
+  already queued or being rated is skipped when its change event arrives again.
 - Provider calls time out after `HCMS_PROVIDER_TIMEOUT_SECONDS` (default `30`)
   per attempt and are retried `HCMS_PROVIDER_MAX_RETRIES` times (default `2`).
+- The periodic summary reports rating lag (message written to rating stored);
+  one rating later than `HCMS_RATING_LAG_WARN_SECONDS` (default `120`) logs a
+  warning.
 
 Main tuning variables (set in `.env`):
 
@@ -102,8 +107,10 @@ Main tuning variables (set in `.env`):
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS`
 - `HCMS_LOG_LEVEL`
 - `HCMS_MODERATION_PROVIDERS`
+- `HCMS_WORKER_THREADS`
 - `HCMS_PROVIDER_TIMEOUT_SECONDS`
 - `HCMS_PROVIDER_MAX_RETRIES`
+- `HCMS_RATING_LAG_WARN_SECONDS`
 
 Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
 

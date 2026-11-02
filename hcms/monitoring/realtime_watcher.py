@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import dataclasses
 import functools
 import logging
 import math
 import random
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Optional
 
@@ -117,7 +121,7 @@ def _get_default_llama_guard_rater() -> ProviderRater:
 class RealtimeConversationWatcher:
     """Watches MongoDB conversation changes and persists moderation ratings."""
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-instance-attributes,too-many-branches
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-instance-attributes,too-many-branches,too-many-locals
     def __init__(
         self,
         repository: MongoConversationRepository,
@@ -132,6 +136,8 @@ class RealtimeConversationWatcher:
         reconnect_backoff_jitter_seconds: float = 0.25,
         summary_log_interval_events: int = 100,
         reviewer_ids: Optional[Iterable[str]] = None,
+        worker_threads: int = 1,
+        rating_lag_warn_seconds: float = 120.0,
     ) -> None:
         self.repository = repository
         # Providers this watcher rates and writes (default: all). Entries of
@@ -168,6 +174,27 @@ class RealtimeConversationWatcher:
             reconnect_backoff_jitter_seconds, 0.0
         )
         self.summary_log_interval_events = max(summary_log_interval_events, 1)
+        # Messages are rated on this many threads. Each provider write is one
+        # atomic update of its own reviewer_flags entry, so ratings of different
+        # messages can land in any order without clobbering each other.
+        self.worker_threads = max(worker_threads, 1)
+        # One rating landing later than this after its message was written logs
+        # a warning; 0 disables the warning (the summary still reports lag).
+        self.rating_lag_warn_seconds = max(rating_lag_warn_seconds, 0.0)
+
+        self._lock = threading.Lock()
+        self._executor: Optional[ThreadPoolExecutor] = None
+        # Provider keys queued or being rated by worker threads, so a change
+        # event that arrives again while a rating is in flight is not rated twice.
+        self._in_flight: set[BackfillProviderKey] = set()
+        self._pending_futures: set[Future[None]] = set()
+        # Bounds the queue in front of the workers; the change stream cursor
+        # keeps the rest of the backlog server-side.
+        self._queue_slots = threading.Semaphore(self.worker_threads * 2)
+        self._suppress_lag_warnings = False
+        self._lag_count = 0
+        self._lag_total_seconds = 0.0
+        self._lag_max_seconds = 0.0
 
         self._events_consumed = 0
         self._invalid_documents = 0
@@ -218,7 +245,19 @@ class RealtimeConversationWatcher:
 
     # pylint: disable=too-many-branches
     def run_startup_backfill(self) -> None:
-        """Backfill unrated messages present before the watcher started."""
+        """Backfill unrated messages present before the watcher started.
+
+        Backfilled ratings are late by definition, so they count towards the
+        lag summary but do not log per-message lag warnings.
+        """
+        self._suppress_lag_warnings = True
+        try:
+            self._run_startup_backfill()
+        finally:
+            self._suppress_lag_warnings = False
+
+    def _run_startup_backfill(self) -> None:
+        """Backfill loop; see `run_startup_backfill`."""
         attempts: dict[BackfillProviderKey, int] = {}
         unresolved_provider_keys: set[BackfillProviderKey] = set()
 
@@ -243,11 +282,13 @@ class RealtimeConversationWatcher:
                         self._unresolved_backfill_targets,
                     )
                 else:
-                    LOGGER.info("Startup backfill completed successfully")
+                    LOGGER.info(
+                        "Startup backfill completed successfully (max_lag=%.1fs)",
+                        self._lag_max_seconds,
+                    )
                 return
 
-            progress_made = False
-            retry_pending = False
+            eligible_targets: list[MessageBackfillTarget] = []
             for target in targets:
                 eligible_reviewer_ids: set[str] = set()
                 for reviewer_id in target.missing_reviewer_ids:
@@ -260,16 +301,17 @@ class RealtimeConversationWatcher:
                 if not eligible_reviewer_ids:
                     continue
 
-                eligible_target = MessageBackfillTarget(
-                    document_id=target.document_id,
-                    message_index=target.message_index,
-                    content=target.content,
-                    missing_reviewer_ids=eligible_reviewer_ids,
-                    role=target.role,
-                    previous_user_content=target.previous_user_content,
+                eligible_targets.append(
+                    dataclasses.replace(
+                        target, missing_reviewer_ids=eligible_reviewer_ids
+                    )
                 )
-                provider_results = self.process_message_target(eligible_target)
-                for reviewer_id in eligible_reviewer_ids:
+
+            progress_made = False
+            retry_pending = False
+            batch_results = self._process_targets(eligible_targets)
+            for target, provider_results in zip(eligible_targets, batch_results):
+                for reviewer_id in target.missing_reviewer_ids:
                     key = (target.document_id, target.message_index, reviewer_id)
                     if provider_results.get(reviewer_id, False):
                         attempts.pop(key, None)
@@ -361,10 +403,91 @@ class RealtimeConversationWatcher:
                 previous_user_content=MongoConversationRepository.previous_user_content(
                     messages, message_index
                 ),
+                message_timestamp=message.get("timestamp"),
             )
-            self.process_message_target(target)
+            self._dispatch_target(target)
 
         self._maybe_log_summary()
+
+    def _dispatch_target(self, target: MessageBackfillTarget) -> None:
+        """Rate a message inline, or on a worker thread when several are configured.
+
+        With worker threads, providers already queued or in flight for the same
+        message are skipped, so a change event that arrives again before the
+        first rating lands (the watcher's own write, another provider's write)
+        does not rate it twice. Blocks when the queue in front of the workers
+        is full, so the backlog stays in the change stream.
+        """
+        if self.worker_threads == 1:
+            self.process_message_target(target)
+            return
+
+        with self._lock:
+            reviewer_ids = {
+                reviewer_id
+                for reviewer_id in target.missing_reviewer_ids
+                if (target.document_id, target.message_index, reviewer_id)
+                not in self._in_flight
+            }
+            if not reviewer_ids:
+                return
+            keys = {
+                (target.document_id, target.message_index, reviewer_id)
+                for reviewer_id in reviewer_ids
+            }
+            self._in_flight.update(keys)
+
+        queued_target = dataclasses.replace(target, missing_reviewer_ids=reviewer_ids)
+        # Released by the worker thread, so a `with` block does not fit here.
+        self._queue_slots.acquire()  # pylint: disable=consider-using-with
+        future = self._get_executor().submit(
+            self._process_queued_target, queued_target, keys
+        )
+        with self._lock:
+            self._pending_futures.add(future)
+        future.add_done_callback(self._discard_pending_future)
+
+    def _process_queued_target(
+        self, target: MessageBackfillTarget, keys: set[BackfillProviderKey]
+    ) -> None:
+        """Worker-thread body: rate one message, then free its keys and queue slot."""
+        try:
+            self.process_message_target(target)
+        finally:
+            with self._lock:
+                self._in_flight.difference_update(keys)
+            self._queue_slots.release()
+
+    def _discard_pending_future(self, future: Future[None]) -> None:
+        with self._lock:
+            self._pending_futures.discard(future)
+
+    def _process_targets(
+        self, targets: list[MessageBackfillTarget]
+    ) -> list[ProviderResultMap]:
+        """Rate targets in order, on the worker pool when there is one."""
+        if self.worker_threads == 1 or len(targets) <= 1:
+            return [self.process_message_target(target) for target in targets]
+        return list(self._get_executor().map(self.process_message_target, targets))
+
+    def _get_executor(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=self.worker_threads, thread_name_prefix="hcms-rater"
+            )
+        return self._executor
+
+    def wait_for_pending(self, timeout: Optional[float] = None) -> None:
+        """Block until ratings queued from change events have finished."""
+        with self._lock:
+            pending = list(self._pending_futures)
+        concurrent.futures.wait(pending, timeout=timeout)
+
+    def shutdown(self) -> None:
+        """Finish queued ratings and stop the worker threads."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
 
     def _validate_full_document(
         self, full_document: dict[str, Any]
@@ -454,19 +577,23 @@ class RealtimeConversationWatcher:
         try:
             raw_result = rater(target.content)
             categories, category_other = normalizer(raw_result)
+            rated_at = datetime.now(timezone.utc)
             self.repository.upsert_system_reviewer_flag(
                 document_id=target.document_id,
                 message_index=target.message_index,
                 reviewer_id=reviewer_id,
                 categories=categories,
                 category_other=category_other,
-                created_at=datetime.now(timezone.utc),
+                created_at=rated_at,
             )
-            self._provider_success_counts[reviewer_id] += 1
+            with self._lock:
+                self._provider_success_counts[reviewer_id] += 1
+            self._record_rating_lag(target, provider_name, rated_at)
             return True
         except Exception:  # pylint: disable=broad-exception-caught
             # pragma: no cover - network/runtime path
-            self._provider_failure_counts[reviewer_id] += 1
+            with self._lock:
+                self._provider_failure_counts[reviewer_id] += 1
             LOGGER.exception(
                 "Failed %s rating for document_id=%s message_index=%s",
                 provider_name,
@@ -474,6 +601,40 @@ class RealtimeConversationWatcher:
                 target.message_index,
             )
             return False
+
+    def _record_rating_lag(
+        self, target: MessageBackfillTarget, provider_name: str, rated_at: datetime
+    ) -> None:
+        """Track how long after a message was written its rating landed.
+
+        The lag is the end-to-end delay a dashboard user sees: it includes time
+        spent waiting in the change stream, not only the provider call.
+        """
+        if target.message_timestamp is None:
+            return
+        message_time = target.message_timestamp
+        if message_time.tzinfo is None:
+            message_time = message_time.replace(tzinfo=timezone.utc)
+        lag_seconds = max((rated_at - message_time).total_seconds(), 0.0)
+
+        with self._lock:
+            self._lag_count += 1
+            self._lag_total_seconds += lag_seconds
+            self._lag_max_seconds = max(self._lag_max_seconds, lag_seconds)
+
+        if (
+            self.rating_lag_warn_seconds
+            and lag_seconds > self.rating_lag_warn_seconds
+            and not self._suppress_lag_warnings
+        ):
+            LOGGER.warning(
+                "Rating lag %.1fs exceeds %.0fs: %s for document_id=%s message_index=%s",
+                lag_seconds,
+                self.rating_lag_warn_seconds,
+                provider_name,
+                target.document_id,
+                target.message_index,
+            )
 
     def _compute_reconnect_sleep_seconds(self, failure_number: int) -> float:
         """Compute reconnect delay using exponential backoff with jitter."""
@@ -501,19 +662,32 @@ class RealtimeConversationWatcher:
         if self._events_consumed % self.summary_log_interval_events != 0:
             return
 
-        LOGGER.info(
-            "Watcher summary events=%d invalid_documents=%d "
-            "openai_success=%d openai_failure=%d "
-            "llama_success=%d llama_failure=%d "
-            "unresolved_backfill_targets=%d",
-            self._events_consumed,
-            self._invalid_documents,
-            self._provider_success_counts[SYSTEM_OPENAI_REVIEWER_ID],
-            self._provider_failure_counts[SYSTEM_OPENAI_REVIEWER_ID],
-            self._provider_success_counts[SYSTEM_LLAMA_REVIEWER_ID],
-            self._provider_failure_counts[SYSTEM_LLAMA_REVIEWER_ID],
-            self._unresolved_backfill_targets,
-        )
+        with self._lock:
+            lag_count = self._lag_count
+            mean_lag = self._lag_total_seconds / lag_count if lag_count else 0.0
+            max_lag = self._lag_max_seconds
+            # Lag is reported per summary window so a growing backlog shows up.
+            self._lag_count = 0
+            self._lag_total_seconds = 0.0
+            self._lag_max_seconds = 0.0
+            LOGGER.info(
+                "Watcher summary events=%d invalid_documents=%d "
+                "openai_success=%d openai_failure=%d "
+                "llama_success=%d llama_failure=%d "
+                "unresolved_backfill_targets=%d "
+                "rated=%d mean_lag=%.1fs max_lag=%.1fs in_flight=%d",
+                self._events_consumed,
+                self._invalid_documents,
+                self._provider_success_counts[SYSTEM_OPENAI_REVIEWER_ID],
+                self._provider_failure_counts[SYSTEM_OPENAI_REVIEWER_ID],
+                self._provider_success_counts[SYSTEM_LLAMA_REVIEWER_ID],
+                self._provider_failure_counts[SYSTEM_LLAMA_REVIEWER_ID],
+                self._unresolved_backfill_targets,
+                lag_count,
+                mean_lag,
+                max_lag,
+                len(self._in_flight),
+            )
 
     @staticmethod
     def extract_candidate_message_indexes(
