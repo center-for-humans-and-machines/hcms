@@ -44,7 +44,7 @@ jobs:
 
       - name: Set up Poetry
         id: setup-poetry
-        uses: ./.github/actions/setup-poetry # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
+        uses: center-for-humans-and-machines/github-actions/setup-poetry@4f961d7426d6969474be67c43c1b48579c717ecd # v1.1.0
 
       - name: Install dependencies
         run: poetry install
@@ -107,7 +107,7 @@ jobs:
 
       - name: Set up Poetry
         id: setup-poetry
-        uses: ./.github/actions/setup-poetry # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
+        uses: center-for-humans-and-machines/github-actions/setup-poetry@4f961d7426d6969474be67c43c1b48579c717ecd # v1.1.0
 
       - name: Install dependencies
         run: poetry install

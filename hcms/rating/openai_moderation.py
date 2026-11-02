@@ -9,9 +9,12 @@ from openai import OpenAI
 from hcms.loading.constants import DATASET_DIR
 from hcms.utils import get_env_variable
 from hcms.utils.cache import get_cached_result, save_cached_result
+from hcms.rating.provider_client import provider_client_options
 from hcms.utils.moderation import RatingConfig, _rate_and_save_conversations
 
-client = OpenAI(api_key=get_env_variable("OPENAI_MODERATION_API_KEY"))
+client = OpenAI(
+    api_key=get_env_variable("OPENAI_MODERATION_API_KEY"), **provider_client_options()
+)
 
 
 def _rate_text_with_openai_moderation(content: str) -> List[int | str]:

@@ -6,7 +6,7 @@ This repository deploys the monitoring `watcher` service through GitHub Actions 
 
 - Workflow: [`../.github/workflows/deployment.yml`](../.github/workflows/deployment.yml)
 - Composite action (vars): [`../.github/actions/resolve-service-vars/action.yml`](../.github/actions/resolve-service-vars/action.yml)
-- Composite action (deploy): [`../.github/actions/deploy-helm/action.yml`](../.github/actions/deploy-helm/action.yml)
+- Composite action (deploy): shared [`deploy-helm`](https://github.com/center-for-humans-and-machines/github-actions/tree/main/deploy-helm)
 - Helm chart: [`../kubernetes/worker-service`](../kubernetes/worker-service)
 
 The workflow builds the `watcher` image, deploys it only if the build succeeds,
@@ -47,7 +47,7 @@ The `watcher` service follows this flow:
 1. Resolve deterministic app/image naming (`hpms-watcher-<APP_NAME>-<branch>`).
 1. Build and push Docker image from `Dockerfile`.
 1. Generate `$RUNNER_TEMP/deployment_vars.yml` for runtime environment values.
-1. Deploy with local `deploy-helm` composite action only when the build job succeeds.
+1. Deploy with the shared `deploy-helm` composite action only when the build job succeeds.
 
 Naming note:
 
@@ -74,9 +74,10 @@ Required values:
 Fixed value:
 
 - `HCMS_MODERATION_PROVIDERS` (`openai_moderation`): the deployed watcher only
-  writes OpenAI moderation ratings. Llama Guard runs in a separate watcher on
-  the GPU host, which the cluster can't reach (see the
-  [Llama Guard watcher ADR](./adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)).
+  writes OpenAI moderation ratings. Llama Guard and the LLM judge each run in a
+  separate watcher on the GPU host, which the cluster can't reach (see the
+  [Llama Guard watcher ADR](./adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)
+  and the [LLM judge ADR](./adr/2026-11-02-llm-judge-ktb-provider.md)).
 
 Provider-specific requirement:
 
@@ -93,6 +94,13 @@ Optional values with defaults:
 - `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS` (`30`)
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS` (`0.25`)
 - `HCMS_LOG_LEVEL` (`INFO`)
+
+Read by the watcher with built-in defaults (the workflow does not set them yet):
+
+- `HCMS_WORKER_THREADS` (`4`)
+- `HCMS_PROVIDER_TIMEOUT_SECONDS` (`30`)
+- `HCMS_PROVIDER_MAX_RETRIES` (`2`)
+- `HCMS_RATING_LAG_WARN_SECONDS` (`120`)
 
 ## Required GitHub Variables
 
