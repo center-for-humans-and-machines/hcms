@@ -1,5 +1,6 @@
 """Base class for processing data using batch processing."""
 
+import re
 from abc import ABC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
@@ -10,6 +11,10 @@ from pydantic import BaseModel
 from hcms.constants import CONTENT, ROLE, SYSTEM, USER
 from hcms.monitoring.api import BatchConfig
 from hcms.monitoring.processors.batch import BatchProcessor
+
+# Task identifier as validation messages name it ("… in task task-35: …").
+# The custom_id itself starts with "task", so the word is matched, not split on.
+TASK_ID_PATTERN = re.compile(r"\btask ([^\s:]+)")
 
 
 class BaseProcessor(ABC):
@@ -193,9 +198,7 @@ class BaseProcessor(ABC):
         """
         task_ids = set()
         for error in validation_errors:
-            if "task" in error:
-                task_id = error.split("task")[1].split(":")[0].strip()
-                task_ids.add(task_id)
+            task_ids.update(TASK_ID_PATTERN.findall(error))
 
         batch_job = self._batch_processor.batch_job
         if batch_job:
