@@ -1,8 +1,9 @@
 """Rate historical messages once, without a change stream.
 
-The realtime watcher only backfills messages newer than `MONGODB_BACKFILL_SINCE`,
-so live detection is never stuck behind history. This job rates the rest, one
-provider at a time, and can be run again: rated messages are skipped.
+The realtime watcher's startup backfill covers every unrated message, in
+bounded batches behind live events. When `MONGODB_BACKFILL_SINCE` cuts it
+short, this job rates the rest, one provider at a time, and can be run again:
+rated messages are skipped.
 
 Usage:
     poetry run python -m hcms.monitoring.backfill_conversations \\

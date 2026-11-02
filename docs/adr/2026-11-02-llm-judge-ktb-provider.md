@@ -49,10 +49,12 @@ Three constraints shaped the watcher side:
 2. **Stored like the other providers.** One `reviewer_flags` entry per message
    with `categories` and the rationale as `comment`; `category_other` stays
    empty. No schema change anywhere.
-3. **Opt-in, own watcher.** `HCMS_MODERATION_PROVIDERS` still defaults to
-   `openai_moderation,llama_guard`; the judge runs as `llm_judge` in its own
-   watcher per database on the tower, so its latency never sits in front of
-   Llama Guard and no existing watcher needs its credentials.
+3. **On by default, own watcher.** `llm_judge` is a default provider like
+   `llama_guard`: `HCMS_MODERATION_PROVIDERS` defaults to all three, and a
+   deployment without a model's endpoint names the providers it runs (the
+   cluster's watcher: `openai_moderation`). On the tower the judge runs in its
+   own watcher per database, next to Llama Guard's, so its latency never sits
+   in front of Llama Guard.
 4. **Bounded cycles instead of backfill-then-live.** The watcher repeats: up to
    `MONGODB_LIVE_MAX_EVENTS_PER_CYCLE` live events (or
    `MONGODB_LIVE_MAX_SECONDS_PER_CYCLE`), then at most `MONGODB_RETRY_MAX_PER_CYCLE`
@@ -67,8 +69,11 @@ Three constraints shaped the watcher side:
    entries, ordered by `_id`, and each batch continues from the last complete
    conversation, so a batch costs about what its messages cost. The window
    `MONGODB_BACKFILL_SINCE` (and `--until` of the one-off job) applies to the
-   message `timestamp`, never the conversation's creation. History before the
-   go-live date is rated once with `hcms.monitoring.backfill_conversations`.
+   message `timestamp`, never the conversation's creation. The judge watchers
+   run without a window, like Llama Guard's: the startup backfill rates all
+   history, in small batches behind live events, and the one-off job
+   `hcms.monitoring.backfill_conversations` remains for rating a range by
+   hand.
 6. **Failures are failures.** Transport errors, truncated completions and
    output that fails schema or semantic validation raise; nothing is written,
    the failure is counted, logged as `ERROR` (the tower's Sentry watcher check

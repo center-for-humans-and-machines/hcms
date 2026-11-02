@@ -19,11 +19,10 @@ SYSTEM_LLM_JUDGE_REVIEWER_ID = "system_llm_judge"
 SYSTEM_REVIEWER_IDS: frozenset[str] = frozenset(
     {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID, SYSTEM_LLM_JUDGE_REVIEWER_ID}
 )
-# Reviewers run when none are named. The LLM judge is opt-in, so a watcher
-# that predates it never needs the judge's endpoint or credentials.
-DEFAULT_SYSTEM_REVIEWER_IDS: frozenset[str] = frozenset(
-    {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID}
-)
+# Reviewers run when none are named: every provider, the LLM judge like
+# Llama Guard. A deployment that lacks a provider's endpoint names the ones it
+# runs (HCMS_MODERATION_PROVIDERS).
+DEFAULT_SYSTEM_REVIEWER_IDS: frozenset[str] = SYSTEM_REVIEWER_IDS
 # Earlier turns handed to raters that judge a message in its conversation.
 CONTEXT_MESSAGE_LIMIT = 4
 LOGGER = logging.getLogger(__name__)

@@ -20,8 +20,15 @@ from hcms.monitoring import watch_mongo_conversations
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        # The LLM judge is opt-in: an unset variable never requires its endpoint.
-        (None, {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID}),
+        # Unset: every provider, the LLM judge like Llama Guard.
+        (
+            None,
+            {
+                SYSTEM_OPENAI_REVIEWER_ID,
+                SYSTEM_LLAMA_REVIEWER_ID,
+                SYSTEM_LLM_JUDGE_REVIEWER_ID,
+            },
+        ),
         ("llama_guard", {SYSTEM_LLAMA_REVIEWER_ID}),
         (" openai_moderation ", {SYSTEM_OPENAI_REVIEWER_ID}),
         (

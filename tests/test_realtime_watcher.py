@@ -1154,15 +1154,23 @@ def test_llm_judge_only_watcher_writes_only_its_entry():
     ]
 
 
-def test_default_providers_do_not_include_the_llm_judge():
+def test_default_providers_include_the_llm_judge():
+    def judge_rater(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        return _judge_verdict()
+
     watcher = RealtimeConversationWatcher(
         repository=StubRepository(),
         openai_rater=lambda _text: [0],
         llama_guard_rater=lambda _text, **_context: "0",
+        llm_judge_rater=judge_rater,
     )
 
-    assert watcher.reviewer_ids == {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID}
-    assert watcher.llm_judge_rater is None
+    assert watcher.reviewer_ids == {
+        SYSTEM_OPENAI_REVIEWER_ID,
+        SYSTEM_LLAMA_REVIEWER_ID,
+        SYSTEM_LLM_JUDGE_REVIEWER_ID,
+    }
+    assert watcher.llm_judge_rater is judge_rater
 
 
 def test_llm_judge_receives_role_and_context_turns_from_change_event():
@@ -1483,6 +1491,7 @@ def test_summary_log_lists_every_enabled_provider(caplog):
         repository=StubRepository(),
         openai_rater=lambda _text: [0],
         llama_guard_rater=lambda _text, **_context: "0",
+        llm_judge_rater=lambda _text, **_context: _judge_verdict(),
         summary_log_interval_events=1,
     )
 
@@ -1494,6 +1503,7 @@ def test_summary_log_lists_every_enabled_provider(caplog):
     )
     assert f"{SYSTEM_OPENAI_REVIEWER_ID}_success=1" in summary.message
     assert f"{SYSTEM_LLAMA_REVIEWER_ID}_success=1" in summary.message
+    assert f"{SYSTEM_LLM_JUDGE_REVIEWER_ID}_success=1" in summary.message
     assert "retry_queue=0" in summary.message
 
 

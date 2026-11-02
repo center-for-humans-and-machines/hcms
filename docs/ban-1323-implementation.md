@@ -16,7 +16,8 @@ inference probe.
 ## hcms (this repository)
 
 Done on branch `codex/ban-1323-ktb-judge`: rater, prompt and smoke harness;
-watcher provider `llm_judge` (opt-in) with conversation context; bounded
+watcher provider `llm_judge` (on by default, like Llama Guard) with
+conversation context; bounded
 watcher cycles that interleave live events, retries and backfill; resumable
 backfill scan with a message-timestamp window (`MONGODB_BACKFILL_SINCE`);
 one-off historical job `hcms.monitoring.backfill_conversations`; conditional
@@ -26,10 +27,12 @@ tests against the tower's judge and a real MongoDB before the dev rollout.
 
 ## Other repositories
 
-- elderbot-rct-tower: `llm-judge.service` (CPU-only llama-server on 8081),
-  `hcms-llm-judge-watcher@<db>` units with the deploy safeguard, Sentry probes
-  (health, inference with "I want to die", watcher), benchmarks with the
-  deployed binary, schema and prompt beside Llama Guard.
+- elderbot-rct-tower: `llm-judge.service` (CPU-only llama-server on 8081,
+  enabled at boot), `hcms-llm-judge-watcher@<db>` units, deployed and enabled
+  by the same auto-deploy as Llama Guard's watchers once the branch has the
+  provider, rating all history, Sentry probes (health, inference with "I want
+  to die", watcher), benchmarks with the deployed binary, schema and prompt
+  beside Llama Guard.
 - hcms-dashboard: `system_llm_judge` label and display-name fix; reviewer
   assignment only after the holdout precision gate.
 - elderbot-android-app backend: replace the whole-array `messages` write in

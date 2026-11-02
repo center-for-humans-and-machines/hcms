@@ -9,7 +9,7 @@ import operator
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
 import pytest
 from bson import ObjectId
@@ -20,6 +20,7 @@ from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
     SYSTEM_LLM_JUDGE_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
+    SYSTEM_REVIEWER_IDS,
     MongoConversationRepository,
 )
 
@@ -252,15 +253,15 @@ def test_get_backfill_targets_includes_only_messages_missing_system_flags():
     first = targets[0]
     assert first.document_id == conversation["_id"]
     assert first.message_index == 0
-    assert first.missing_reviewer_ids == {
-        SYSTEM_OPENAI_REVIEWER_ID,
-        SYSTEM_LLAMA_REVIEWER_ID,
-    }
+    assert first.missing_reviewer_ids == SYSTEM_REVIEWER_IDS
 
     second = targets[1]
     assert second.document_id == conversation["_id"]
     assert second.message_index == 1
-    assert second.missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
+    assert second.missing_reviewer_ids == {
+        SYSTEM_LLAMA_REVIEWER_ID,
+        SYSTEM_LLM_JUDGE_REVIEWER_ID,
+    }
 
 
 def test_get_backfill_targets_excludes_exhausted_provider_keys():
@@ -269,8 +270,7 @@ def test_get_backfill_targets_excludes_exhausted_provider_keys():
         FakeCollection([conversation])
     )
     excluded_provider_keys = {
-        (conversation["_id"], 0, SYSTEM_OPENAI_REVIEWER_ID),
-        (conversation["_id"], 0, SYSTEM_LLAMA_REVIEWER_ID),
+        (conversation["_id"], 0, reviewer_id) for reviewer_id in SYSTEM_REVIEWER_IDS
     }
 
     targets = repository.get_backfill_targets(
@@ -280,7 +280,10 @@ def test_get_backfill_targets_excludes_exhausted_provider_keys():
     assert len(targets) == 1
     assert targets[0].document_id == conversation["_id"]
     assert targets[0].message_index == 1
-    assert targets[0].missing_reviewer_ids == {SYSTEM_LLAMA_REVIEWER_ID}
+    assert targets[0].missing_reviewer_ids == {
+        SYSTEM_LLAMA_REVIEWER_ID,
+        SYSTEM_LLM_JUDGE_REVIEWER_ID,
+    }
 
 
 def test_get_backfill_targets_only_counts_requested_reviewers():
@@ -899,7 +902,9 @@ def test_reviewer_flag_accepts_null_and_empty_comment(comment):
     assert validated.messages[0].reviewer_flags[0].comment == comment
 
 
-def _all_system_flags(now: datetime) -> list[dict[str, Any]]:
+def _all_system_flags(
+    now: datetime, reviewer_ids: Iterable[str] = SYSTEM_REVIEWER_IDS
+) -> list[dict[str, Any]]:
     return [
         {
             "reviewer_id": reviewer_id,
@@ -909,18 +914,33 @@ def _all_system_flags(now: datetime) -> list[dict[str, Any]]:
             "category_other": "",
             "comment": "",
         }
-        for reviewer_id in (SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID)
+        for reviewer_id in sorted(reviewer_ids)
     ]
 
 
-def test_missing_system_reviewers_default_leaves_the_llm_judge_opt_in():
+def test_missing_system_reviewers_default_includes_the_llm_judge():
     now = datetime.now(timezone.utc)
-    message = _message_doc(now, content="hello", reviewer_flags=_all_system_flags(now))
+    rated_by_all = _message_doc(
+        now, content="hello", reviewer_flags=_all_system_flags(now)
+    )
+    without_judge = _message_doc(
+        now,
+        content="hello",
+        reviewer_flags=_all_system_flags(
+            now, (SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID)
+        ),
+    )
 
-    assert MongoConversationRepository.missing_system_reviewers(message) == set()
-    assert MongoConversationRepository.missing_system_reviewers(
-        message, {SYSTEM_LLM_JUDGE_REVIEWER_ID}
-    ) == {SYSTEM_LLM_JUDGE_REVIEWER_ID}
+    assert MongoConversationRepository.missing_system_reviewers(rated_by_all) == set()
+    assert MongoConversationRepository.missing_system_reviewers(without_judge) == {
+        SYSTEM_LLM_JUDGE_REVIEWER_ID
+    }
+    assert (
+        MongoConversationRepository.missing_system_reviewers(
+            without_judge, {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID}
+        )
+        == set()
+    )
 
 
 @pytest.mark.parametrize(
@@ -1041,7 +1061,11 @@ def test_backfill_query_skips_conversations_rated_by_the_requested_providers():
     assert [
         branch["messages"]["$elemMatch"]["reviewer_flags.reviewer_id"]
         for branch in query["$or"]
-    ] == [{"$ne": SYSTEM_LLAMA_REVIEWER_ID}, {"$ne": SYSTEM_OPENAI_REVIEWER_ID}]
+    ] == [
+        {"$ne": SYSTEM_LLAMA_REVIEWER_ID},
+        {"$ne": SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        {"$ne": SYSTEM_OPENAI_REVIEWER_ID},
+    ]
     assert query["$or"][0]["messages"]["$elemMatch"]["role"] == {"$ne": "system"}
 
 

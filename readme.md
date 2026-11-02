@@ -84,9 +84,10 @@ Watcher runtime behavior:
   backfill batch of `MONGODB_BACKFILL_BATCH_SIZE` messages. A live message
   waits at most one cycle, however much history is left to backfill.
 - Startup backfill retries transient provider failures (default `10` retries, `2s` between no-progress retries)
-  and only covers messages with a timestamp at or after `MONGODB_BACKFILL_SINCE`
-  (unset: all). Older messages are rated once with
-  `poetry run python -m hcms.monitoring.backfill_conversations --provider <name> --until <go-live>`.
+  and covers every unrated message, however old (every provider, the LLM judge
+  included). `MONGODB_BACKFILL_SINCE` cuts it short to messages with a
+  timestamp at or after that time; the rest are rated once with
+  `poetry run python -m hcms.monitoring.backfill_conversations --provider <name> --until <time>`.
 - A rating that fails (transport error, or model output the rater rejects) is
   never written; it is retried with backoff and logged as an error when the
   retry budget is spent. A flag is only written while the message still has
@@ -94,7 +95,7 @@ Watcher runtime behavior:
 - Change stream reconnect uses exponential backoff with jitter (default `1s` base, `30s` max, `0.25s` jitter).
 - Logging level defaults to `INFO` and can be tuned with `HCMS_LOG_LEVEL`.
 - `HCMS_MODERATION_PROVIDERS` picks the providers a watcher runs
-  (`openai_moderation`, `llama_guard`, `llm_judge`; default the first two).
+  (`openai_moderation`, `llama_guard`, `llm_judge`; default all three).
   A watcher only fills in missing `reviewer_flags` entries of its own
   providers, so one watcher per provider can run on different hosts.
 - Assistant replies are rated by Llama Guard together with the user message

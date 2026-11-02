@@ -21,9 +21,10 @@ MODERATION_PROVIDERS = {
     "llama_guard": SYSTEM_LLAMA_REVIEWER_ID,
     "llm_judge": SYSTEM_LLM_JUDGE_REVIEWER_ID,
 }
-# Providers run when HCMS_MODERATION_PROVIDERS is unset. The LLM judge is
-# opt-in: it needs its own model endpoint, so no existing watcher picks it up.
-DEFAULT_MODERATION_PROVIDERS = ("openai_moderation", "llama_guard")
+# Providers run when HCMS_MODERATION_PROVIDERS is unset: all of them, the LLM
+# judge like Llama Guard. A deployment without a provider's endpoint names the
+# ones it runs.
+DEFAULT_MODERATION_PROVIDERS = ("openai_moderation", "llama_guard", "llm_judge")
 
 
 def _get_int_env(var_name: str, default_value: int) -> int:
