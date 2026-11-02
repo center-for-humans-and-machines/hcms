@@ -14,20 +14,59 @@ from hcms.database.models import ConversationDocument, MessageDocument
 
 SYSTEM_OPENAI_REVIEWER_ID = "system_openai_moderation"
 SYSTEM_LLAMA_REVIEWER_ID = "system_llama_guard"
+SYSTEM_LLM_JUDGE_REVIEWER_ID = "system_llm_judge"
+# Every system reviewer a watcher may run.
 SYSTEM_REVIEWER_IDS: frozenset[str] = frozenset(
+    {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID, SYSTEM_LLM_JUDGE_REVIEWER_ID}
+)
+# Reviewers run when none are named. The LLM judge is opt-in, so a watcher
+# that predates it never needs the judge's endpoint or credentials.
+DEFAULT_SYSTEM_REVIEWER_IDS: frozenset[str] = frozenset(
     {SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID}
 )
+# Earlier turns handed to raters that judge a message in its conversation.
+CONTEXT_MESSAGE_LIMIT = 4
 LOGGER = logging.getLogger(__name__)
+
+# (role, content) of earlier turns, oldest first.
+ContextMessages = tuple[tuple[str, str], ...]
+
+_BACKFILL_PROJECTION = {
+    "_id": 1,
+    "participant_id": 1,
+    "model": 1,
+    "experiment_id": 1,
+    "conversation_id": 1,
+    "project_id": 1,
+    "created_at": 1,
+    "custom_system_message_id": 1,
+    "multi_rounds": 1,
+    "messages": 1,
+    "opened_by": 1,
+    "reviewed_messages": 1,
+    "assigned_messages": 1,
+}
+
+
+def _as_utc(value: Any) -> Optional[datetime]:
+    """Return a timezone-aware UTC datetime, treating naive values as UTC."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
-class MessageBackfillTarget:
+class MessageBackfillTarget:  # pylint: disable=too-many-instance-attributes
     """Message that still requires one or more system moderation writes.
 
-    For assistant messages, `previous_user_content` holds the user message the
-    reply answers, so raters can judge the reply in context.
-    `message_timestamp` is when the message was written, so the watcher can
-    report how long its rating took to land.
+    `content` is the exact text that gets rated; the flag is only written while
+    the message still has it. For assistant messages, `previous_user_content`
+    holds the user message the reply answers (Llama Guard rates the pair), and
+    `context_messages` holds the previous turns for raters that judge any
+    message in context. `message_timestamp` is when the message was written,
+    so the watcher can report how long its rating took to land.
     """
 
     document_id: Any
@@ -37,6 +76,20 @@ class MessageBackfillTarget:
     role: str = ""
     previous_user_content: str = ""
     message_timestamp: Optional[datetime] = None
+    context_messages: ContextMessages = ()
+
+
+@dataclass(frozen=True)
+class BackfillBatch:
+    """One page of a resumable backfill scan.
+
+    `resume_after` is the conversation `_id` to continue from on the next call;
+    `None` means the scan reached the end and the next call starts over. An
+    empty `targets` list means nothing is left to rate.
+    """
+
+    targets: list[MessageBackfillTarget]
+    resume_after: Any = None
 
 
 class MongoConversationRepository:
@@ -98,8 +151,9 @@ class MongoConversationRepository:
     ) -> Set[str]:
         """Return system reviewer IDs that have not yet been persisted.
 
-        Only `reviewer_ids` are considered (default: all system reviewers), so a
-        watcher running a subset of providers ignores the others' entries.
+        Only `reviewer_ids` are considered (default: the providers run without
+        configuration, see `DEFAULT_SYSTEM_REVIEWER_IDS`), so a watcher running
+        a subset of providers ignores the others' entries.
         """
         if not MongoConversationRepository.is_message_eligible_for_system_reviewers(
             message
@@ -114,13 +168,38 @@ class MongoConversationRepository:
         }
 
         expected_reviewer_ids = (
-            SYSTEM_REVIEWER_IDS if reviewer_ids is None else reviewer_ids
+            DEFAULT_SYSTEM_REVIEWER_IDS if reviewer_ids is None else reviewer_ids
         )
         return {
             reviewer_id
             for reviewer_id in expected_reviewer_ids
             if reviewer_id not in existing_reviewer_ids
         }
+
+    @staticmethod
+    def context_messages(
+        messages: list[Any], message_index: int, limit: int = CONTEXT_MESSAGE_LIMIT
+    ) -> ContextMessages:
+        """Return up to `limit` earlier turns of any role but system, oldest first.
+
+        Blank turns are skipped. Raters that judge a message in context get these
+        together with the message itself, whatever its role.
+        """
+        if limit <= 0 or not 0 <= message_index < len(messages):
+            return ()
+
+        turns: list[tuple[str, str]] = []
+        for earlier in messages[:message_index]:
+            if not isinstance(earlier, dict):
+                continue
+            role = earlier.get("role")
+            content = earlier.get("content")
+            if not isinstance(role, str) or not role.strip() or role.strip() == SYSTEM:
+                continue
+            if not isinstance(content, str) or not content.strip():
+                continue
+            turns.append((role, content))
+        return tuple(turns[-limit:])
 
     @staticmethod
     def previous_user_content(messages: list[Any], message_index: int) -> str:
@@ -157,48 +236,77 @@ class MongoConversationRepository:
 
         return role.strip() != SYSTEM
 
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     def get_backfill_targets(
         self,
         batch_size: int = 200,
         excluded_provider_keys: Optional[Set[tuple[Any, int, str]]] = None,
         reviewer_ids: Optional[Set[str]] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
     ) -> list[MessageBackfillTarget]:
-        """Find messages that still need one or both system moderation writes.
+        """Find messages that still need system moderation writes, from the start.
 
-        Only `reviewer_ids` count as missing (default: all system reviewers).
+        Convenience wrapper around `next_backfill_batch` for callers that don't
+        resume a scan.
         """
-        targets: list[MessageBackfillTarget] = []
+        return self.next_backfill_batch(
+            batch_size=batch_size,
+            excluded_provider_keys=excluded_provider_keys,
+            reviewer_ids=reviewer_ids,
+            since=since,
+            until=until,
+        ).targets
+
+    def next_backfill_batch(
+        self,
+        batch_size: int = 200,
+        excluded_provider_keys: Optional[Set[tuple[Any, int, str]]] = None,
+        reviewer_ids: Optional[Set[str]] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+        after_id: Any = None,
+    ) -> BackfillBatch:
+        """Return the next batch of messages missing system moderation writes.
+
+        MongoDB only returns conversations that still hold an eligible message
+        without an entry of one of `reviewer_ids` (default:
+        `DEFAULT_SYSTEM_REVIEWER_IDS`), ordered by `_id`, and `after_id` continues
+        a scan where the previous batch stopped, so a batch costs about as much
+        as the messages it returns instead of a scan of the whole collection.
+        `since`/`until` bound the message `timestamp` (not the conversation's
+        creation), so a new message in an old conversation is still found.
+        """
         excluded_provider_keys = excluded_provider_keys or set()
+        expected_reviewer_ids = (
+            set(DEFAULT_SYSTEM_REVIEWER_IDS)
+            if reviewer_ids is None
+            else set(reviewer_ids)
+        )
+        targets: list[MessageBackfillTarget] = []
 
         cursor = self.collection.find(
-            {},
-            projection={
-                "_id": 1,
-                "participant_id": 1,
-                "model": 1,
-                "experiment_id": 1,
-                "conversation_id": 1,
-                "project_id": 1,
-                "created_at": 1,
-                "custom_system_message_id": 1,
-                "multi_rounds": 1,
-                "messages": 1,
-                "opened_by": 1,
-                "reviewed_messages": 1,
-                "assigned_messages": 1,
-            },
+            self._backfill_query(expected_reviewer_ids, since, until, after_id),
+            projection=_BACKFILL_PROJECTION,
+            sort=[("_id", 1)],
         )
 
+        # The `_id` of the last conversation scanned completely: a batch that
+        # fills up in the middle of a conversation resumes with that conversation.
+        previous_document_id = after_id
         for raw_conversation in cursor:
+            document_id = raw_conversation.get("_id")
             validated_conversation = self.validate_conversation_document(
                 raw_conversation
             )
             if validated_conversation is None:
+                previous_document_id = document_id
                 continue
 
             document_id = validated_conversation.get("_id")
             messages = validated_conversation.get("messages", [])
             if not isinstance(messages, list):
+                previous_document_id = document_id
                 continue
 
             for message_index, message in enumerate(messages):
@@ -206,9 +314,11 @@ class MongoConversationRepository:
                     continue
                 if not self.is_message_eligible_for_system_reviewers(message):
                     continue
+                if not self._message_in_window(message, since, until):
+                    continue
                 content = message["content"]
 
-                missing = self.missing_system_reviewers(message, reviewer_ids)
+                missing = self.missing_system_reviewers(message, expected_reviewer_ids)
                 missing = {
                     reviewer_id
                     for reviewer_id in missing
@@ -229,12 +339,77 @@ class MongoConversationRepository:
                             messages, message_index
                         ),
                         message_timestamp=message.get("timestamp"),
+                        context_messages=self.context_messages(messages, message_index),
                     )
                 )
                 if len(targets) >= batch_size:
-                    return targets
+                    return BackfillBatch(
+                        targets=targets, resume_after=previous_document_id
+                    )
 
-        return targets
+            previous_document_id = document_id
+
+        return BackfillBatch(targets=targets, resume_after=None)
+
+    # pylint: enable=too-many-arguments,too-many-positional-arguments,too-many-locals
+
+    @staticmethod
+    def _backfill_query(
+        reviewer_ids: Set[str],
+        since: Optional[datetime],
+        until: Optional[datetime],
+        after_id: Any,
+    ) -> dict[str, Any]:
+        """Match conversations with an eligible message lacking one of the reviewers."""
+        window: dict[str, Any] = {}
+        if since is not None:
+            window["$gte"] = since
+        if until is not None:
+            window["$lt"] = until
+
+        unrated_message: dict[str, Any] = {
+            "role": {"$ne": SYSTEM},
+            "content": {"$type": "string", "$ne": ""},
+        }
+        if window:
+            unrated_message["timestamp"] = window
+
+        query: dict[str, Any] = {
+            "$or": [
+                {
+                    "messages": {
+                        "$elemMatch": {
+                            **unrated_message,
+                            "reviewer_flags.reviewer_id": {"$ne": reviewer_id},
+                        }
+                    }
+                }
+                for reviewer_id in sorted(reviewer_ids)
+            ]
+        }
+        if after_id is not None:
+            query["_id"] = {"$gt": after_id}
+        return query
+
+    @staticmethod
+    def _message_in_window(
+        message: dict[str, Any],
+        since: Optional[datetime],
+        until: Optional[datetime],
+    ) -> bool:
+        """Return whether the message timestamp lies in [since, until)."""
+        if since is None and until is None:
+            return True
+        timestamp = _as_utc(message.get("timestamp"))
+        if timestamp is None:
+            return False
+        since_utc = _as_utc(since)
+        until_utc = _as_utc(until)
+        if since_utc is not None and timestamp < since_utc:
+            return False
+        if until_utc is not None and timestamp >= until_utc:
+            return False
+        return True
 
     def get_message(
         self, document_id: Any, message_index: int
@@ -280,8 +455,18 @@ class MongoConversationRepository:
         categories: Iterable[str],
         category_other: str,
         created_at: Optional[datetime] = None,
-    ) -> None:
-        """Upsert one system reviewer flag per provider for one message."""
+        comment: str = "",
+        expected_content: Optional[str] = None,
+    ) -> bool:
+        """Upsert one system reviewer flag per provider for one message.
+
+        With `expected_content`, the flag is only written while the message still
+        has the content that was rated; a message edited in the meantime keeps
+        its old entries and is rated again from its content-change event.
+
+        Returns:
+            bool: Whether the message matched and the flag was written.
+        """
         timestamp = created_at or datetime.now(timezone.utc)
         normalized_categories = [str(category) for category in categories]
 
@@ -291,20 +476,35 @@ class MongoConversationRepository:
             "created_at": timestamp,
             "categories": normalized_categories,
             "category_other": category_other,
-            "comment": "",
+            "comment": comment,
         }
 
-        self.collection.update_one(
-            {
-                "_id": document_id,
-                f"messages.{message_index}": {"$exists": True},
-            },
+        query: dict[str, Any] = {
+            "_id": document_id,
+            f"messages.{message_index}": {"$exists": True},
+        }
+        if expected_content is not None:
+            query[f"messages.{message_index}.content"] = expected_content
+
+        result = self.collection.update_one(
+            query,
             self._build_reviewer_flag_pipeline(
                 message_index=message_index,
                 reviewer_id=reviewer_id,
                 reviewer_flag=reviewer_flag,
             ),
         )
+        matched = getattr(result, "matched_count", None)
+        if matched == 0:
+            LOGGER.warning(
+                "Skipped %s flag for document_id=%s message_index=%s: "
+                "message missing or changed since it was rated",
+                reviewer_id,
+                document_id,
+                message_index,
+            )
+            return False
+        return True
 
     @staticmethod
     # pylint: disable=line-too-long

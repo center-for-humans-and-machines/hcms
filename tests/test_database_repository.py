@@ -1,9 +1,11 @@
 """Tests for Mongo conversation repository helpers."""
 
 # pylint: disable=missing-function-docstring,too-few-public-methods,duplicate-code
+# pylint: disable=too-many-lines
 
 from __future__ import annotations
 
+import operator
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +18,7 @@ from pydantic import ValidationError
 from hcms.database.models import ConversationDocument
 from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
+    SYSTEM_LLM_JUDGE_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
     MongoConversationRepository,
 )
@@ -32,9 +35,73 @@ class FakeCollection:
     def __init__(self, docs: list[dict[str, Any]]):
         self.docs = {doc["_id"]: deepcopy(doc) for doc in docs}
         self.update_calls = 0
+        self.find_queries: list[dict[str, Any]] = []
 
-    def find(self, *_args, **_kwargs):
-        return [deepcopy(doc) for doc in self.docs.values()]
+    def find(
+        self,
+        query: dict[str, Any] | None = None,
+        projection: dict[str, Any] | None = None,
+        sort: list[tuple[str, int]] | None = None,
+    ):
+        _ = projection
+        self.find_queries.append(deepcopy(query or {}))
+        docs = [deepcopy(doc) for doc in self.docs.values()]
+        if query:
+            docs = [doc for doc in docs if self._matches(doc, query)]
+        if sort:
+            assert sort == [("_id", 1)], "only an ascending _id sort is supported"
+            docs.sort(key=lambda doc: doc["_id"])
+        return docs
+
+    @classmethod
+    def _matches(cls, doc: dict[str, Any], query: dict[str, Any]) -> bool:
+        """Evaluate the subset of MongoDB query syntax the repository uses."""
+        return all(
+            cls._key_matches(doc, key, condition) for key, condition in query.items()
+        )
+
+    @classmethod
+    def _key_matches(cls, doc: dict[str, Any], key: str, condition: Any) -> bool:
+        if key == "$or":
+            return any(cls._matches(doc, branch) for branch in condition)
+        if key == "messages":
+            assert set(condition) == {"$elemMatch"}
+            return any(
+                isinstance(message, dict)
+                and cls._matches(message, condition["$elemMatch"])
+                for message in doc.get("messages", [])
+            )
+        if key == "reviewer_flags.reviewer_id":
+            reviewer_ids = [
+                flag.get("reviewer_id")
+                for flag in doc.get("reviewer_flags", [])
+                if isinstance(flag, dict)
+            ]
+            return cls._field_matches(reviewer_ids, condition)
+        return cls._field_matches(doc.get(key), condition)
+
+    @classmethod
+    def _field_matches(cls, value: Any, condition: Any) -> bool:
+        if not isinstance(condition, dict):
+            return value == condition
+        return all(
+            cls._operator_matches(value, query_operator, operand)
+            for query_operator, operand in condition.items()
+        )
+
+    @staticmethod
+    def _operator_matches(value: Any, query_operator: str, operand: Any) -> bool:
+        if query_operator == "$ne":
+            if isinstance(value, list):
+                return operand not in value
+            return value != operand
+        if query_operator == "$type":
+            assert operand == "string"
+            return isinstance(value, str)
+        comparisons = {"$gt": operator.gt, "$gte": operator.ge, "$lt": operator.lt}
+        if query_operator not in comparisons:
+            raise AssertionError(f"Unsupported query operator {query_operator}")
+        return value is not None and comparisons[query_operator](value, operand)
 
     def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None):
         _ = projection
@@ -72,6 +139,9 @@ class FakeCollection:
             return _UpdateResult(0)
 
         message = doc["messages"][message_index]
+        expected_content = query.get(f"messages.{message_index}.content")
+        if expected_content is not None and message["content"] != expected_content:
+            return _UpdateResult(0)
         reviewer_flags = message["reviewer_flags"]
 
         if isinstance(update, list):
@@ -813,3 +883,236 @@ def test_reviewer_flag_accepts_null_and_empty_comment(comment):
     validated = ConversationDocument.model_validate(document)
 
     assert validated.messages[0].reviewer_flags[0].comment == comment
+
+
+def _all_system_flags(now: datetime) -> list[dict[str, Any]]:
+    return [
+        {
+            "reviewer_id": reviewer_id,
+            "reviewer_by_username": reviewer_id,
+            "created_at": now,
+            "categories": [],
+            "category_other": "",
+            "comment": "",
+        }
+        for reviewer_id in (SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID)
+    ]
+
+
+def test_missing_system_reviewers_default_leaves_the_llm_judge_opt_in():
+    now = datetime.now(timezone.utc)
+    message = _message_doc(now, content="hello", reviewer_flags=_all_system_flags(now))
+
+    assert MongoConversationRepository.missing_system_reviewers(message) == set()
+    assert MongoConversationRepository.missing_system_reviewers(
+        message, {SYSTEM_LLM_JUDGE_REVIEWER_ID}
+    ) == {SYSTEM_LLM_JUDGE_REVIEWER_ID}
+
+
+@pytest.mark.parametrize(
+    ("message_index", "limit", "expected"),
+    [
+        (0, 4, ()),
+        (1, 4, (("user", "first question"),)),
+        # system turns and blank turns are skipped, order is kept
+        (4, 4, (("user", "first question"), ("assistant", "first reply"))),
+        # user targets get context too, capped at the limit, most recent kept
+        (6, 2, (("user", "second question"), ("assistant", "second reply"))),
+        (6, 0, ()),
+        (7, 4, ()),  # out of range
+    ],
+)
+def test_context_messages_returns_earlier_non_system_turns(
+    message_index, limit, expected
+):
+    messages = [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first reply"},
+        {"role": "system", "content": "system note"},
+        {"role": "assistant", "content": "   "},
+        {"role": "user", "content": "second question"},
+        {"role": "assistant", "content": "second reply"},
+        {"role": "user", "content": "third question"},
+    ]
+
+    assert (
+        MongoConversationRepository.context_messages(messages, message_index, limit)
+        == expected
+    )
+
+
+def test_get_backfill_targets_carries_context_messages():
+    now = datetime.now(timezone.utc)
+    conversation = _conversation_doc()
+    conversation["messages"] = [
+        _message_doc(now, content="system prompt", role="system"),
+        _message_doc(now, content="Hello", role="user"),
+        _message_doc(now, content="Hi!"),
+        _message_doc(now, content="I want to die", role="user"),
+    ]
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10)
+
+    assert [(t.message_index, t.context_messages) for t in targets] == [
+        (1, ()),
+        (2, (("user", "Hello"),)),
+        (3, (("user", "Hello"), ("assistant", "Hi!"))),
+    ]
+
+
+def test_backfill_window_uses_message_timestamps_not_conversation_creation():
+    since = datetime(2026, 11, 3, tzinfo=timezone.utc)
+    before = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    after = datetime(2026, 11, 4, tzinfo=timezone.utc)
+
+    old_conversation = _conversation_doc()
+    old_conversation["created_at"] = before
+    old_conversation["messages"] = [
+        _message_doc(before, content="old message", role="user"),
+        # A message added to an old conversation after go-live.
+        _message_doc(after, content="new message", role="user"),
+    ]
+    only_old = _conversation_doc()
+    only_old["created_at"] = before
+    only_old["messages"] = [_message_doc(before, content="older message", role="user")]
+    collection = FakeCollection([old_conversation, only_old])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    targets = repository.get_backfill_targets(
+        batch_size=10, reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID}, since=since
+    )
+
+    assert [(t.document_id, t.content) for t in targets] == [
+        (old_conversation["_id"], "new message")
+    ]
+    assert collection.find_queries[-1]["$or"][0]["messages"]["$elemMatch"][
+        "timestamp"
+    ] == {"$gte": since}
+
+
+def test_backfill_window_until_excludes_later_messages():
+    until = datetime(2026, 11, 3, tzinfo=timezone.utc)
+    conversation = _conversation_doc()
+    conversation["messages"] = [
+        _message_doc(datetime(2026, 11, 2, tzinfo=timezone.utc), content="before"),
+        _message_doc(datetime(2026, 11, 3, tzinfo=timezone.utc), content="at"),
+    ]
+    repository = MongoConversationRepository.from_collection(
+        FakeCollection([conversation])
+    )
+
+    targets = repository.get_backfill_targets(batch_size=10, until=until)
+
+    assert [t.content for t in targets] == ["before"]
+
+
+def test_backfill_query_skips_conversations_rated_by_the_requested_providers():
+    now = datetime.now(timezone.utc)
+    rated = _conversation_doc()
+    rated["messages"] = [
+        _message_doc(now, content="rated", reviewer_flags=_all_system_flags(now))
+    ]
+    unrated = _conversation_doc()
+    collection = FakeCollection([rated, unrated])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    batch = repository.next_backfill_batch(batch_size=10)
+
+    assert {t.document_id for t in batch.targets} == {unrated["_id"]}
+    query = collection.find_queries[-1]
+    assert "_id" not in query
+    assert [
+        branch["messages"]["$elemMatch"]["reviewer_flags.reviewer_id"]
+        for branch in query["$or"]
+    ] == [{"$ne": SYSTEM_LLAMA_REVIEWER_ID}, {"$ne": SYSTEM_OPENAI_REVIEWER_ID}]
+    assert query["$or"][0]["messages"]["$elemMatch"]["role"] == {"$ne": "system"}
+
+
+def test_next_backfill_batch_resumes_after_the_last_complete_conversation():
+    now = datetime.now(timezone.utc)
+    conversations = []
+    for name in ("a", "b", "c"):
+        conversation = _conversation_doc()
+        conversation["messages"] = [_message_doc(now, content=name, role="user")]
+        conversations.append(conversation)
+    collection = FakeCollection(conversations)
+    repository = MongoConversationRepository.from_collection(collection)
+    reviewer_ids = {SYSTEM_LLAMA_REVIEWER_ID}
+
+    first = repository.next_backfill_batch(batch_size=2, reviewer_ids=reviewer_ids)
+
+    assert [t.content for t in first.targets] == ["a", "b"]
+    # The batch filled up inside "b", so the scan resumes with "b" again.
+    assert first.resume_after == conversations[0]["_id"]
+
+    for target in first.targets:
+        repository.upsert_system_reviewer_flag(
+            document_id=target.document_id,
+            message_index=target.message_index,
+            reviewer_id=SYSTEM_LLAMA_REVIEWER_ID,
+            categories=[],
+            category_other="",
+        )
+
+    second = repository.next_backfill_batch(
+        batch_size=2, reviewer_ids=reviewer_ids, after_id=first.resume_after
+    )
+
+    assert [t.content for t in second.targets] == ["c"]
+    assert second.resume_after is None
+    assert collection.find_queries[-1]["_id"] == {"$gt": conversations[0]["_id"]}
+
+    repository.upsert_system_reviewer_flag(
+        document_id=second.targets[0].document_id,
+        message_index=0,
+        reviewer_id=SYSTEM_LLAMA_REVIEWER_ID,
+        categories=[],
+        category_other="",
+    )
+    third = repository.next_backfill_batch(batch_size=2, reviewer_ids=reviewer_ids)
+
+    assert not third.targets
+    assert third.resume_after is None
+
+
+def test_upsert_system_reviewer_flag_writes_comment():
+    conversation = _conversation_doc()
+    collection = FakeCollection([conversation])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    written = repository.upsert_system_reviewer_flag(
+        document_id=conversation["_id"],
+        message_index=0,
+        reviewer_id=SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        categories=["Suicidal ideation"],
+        category_other="",
+        comment="states a wish to die",
+        expected_content="message one",
+    )
+
+    assert written is True
+    (flag,) = collection.docs[conversation["_id"]]["messages"][0]["reviewer_flags"]
+    assert flag["reviewer_id"] == SYSTEM_LLM_JUDGE_REVIEWER_ID
+    assert flag["categories"] == ["Suicidal ideation"]
+    assert flag["comment"] == "states a wish to die"
+
+
+def test_upsert_system_reviewer_flag_skips_a_message_whose_content_changed():
+    conversation = _conversation_doc()
+    collection = FakeCollection([conversation])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    written = repository.upsert_system_reviewer_flag(
+        document_id=conversation["_id"],
+        message_index=0,
+        reviewer_id=SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        categories=["Suicidal ideation"],
+        category_other="",
+        expected_content="message one, as it was before the merge",
+    )
+
+    assert written is False
+    assert collection.docs[conversation["_id"]]["messages"][0]["reviewer_flags"] == []
