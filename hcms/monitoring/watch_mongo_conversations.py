@@ -76,8 +76,11 @@ def main() -> None:
     )
 
     reviewer_ids = _get_reviewer_ids()
+    worker_threads = _get_int_env("HCMS_WORKER_THREADS", 4)
     logging.getLogger(__name__).info(
-        "Moderation providers: %s", ", ".join(sorted(reviewer_ids))
+        "Moderation providers: %s; worker threads: %d",
+        ", ".join(sorted(reviewer_ids)),
+        worker_threads,
     )
 
     watcher = RealtimeConversationWatcher(
@@ -100,11 +103,14 @@ def main() -> None:
         reconnect_backoff_jitter_seconds=_get_float_env(
             "MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS", 0.25
         ),
+        worker_threads=worker_threads,
+        rating_lag_warn_seconds=_get_float_env("HCMS_RATING_LAG_WARN_SECONDS", 120.0),
     )
 
     try:
         watcher.run()
     finally:
+        watcher.shutdown()
         repository.close()
 
 

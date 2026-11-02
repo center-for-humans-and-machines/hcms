@@ -26,6 +26,8 @@ class MessageBackfillTarget:
 
     For assistant messages, `previous_user_content` holds the user message the
     reply answers, so raters can judge the reply in context.
+    `message_timestamp` is when the message was written, so the watcher can
+    report how long its rating took to land.
     """
 
     document_id: Any
@@ -34,6 +36,7 @@ class MessageBackfillTarget:
     missing_reviewer_ids: Set[str]
     role: str = ""
     previous_user_content: str = ""
+    message_timestamp: Optional[datetime] = None
 
 
 class MongoConversationRepository:
@@ -225,6 +228,7 @@ class MongoConversationRepository:
                         previous_user_content=self.previous_user_content(
                             messages, message_index
                         ),
+                        message_timestamp=message.get("timestamp"),
                     )
                 )
                 if len(targets) >= batch_size:
