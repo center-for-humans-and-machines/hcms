@@ -292,32 +292,66 @@ class BaseProcessor(ABC):
         Raises:
             ValueError: If validation fails
         """
+        custom_id = result["custom_id"]
         try:
             first_choice = self._get_first_choice(result)
 
             # Handle error case with content filter results
             if "innererror" in first_choice:
-                content_filter_result = first_choice["innererror"][
-                    "content_filter_result"
-                ]
                 self._validate_content_filters(
-                    content_filter_result, result["custom_id"]
+                    self._require_content_filters(
+                        first_choice["innererror"]["content_filter_result"],
+                        custom_id,
+                        "error",
+                    ),
+                    custom_id,
                 )
                 return
 
-            # Handle successful case
-            choice_filters = first_choice["content_filter_results"]
-            prompt_filters = result["response"]["body"]["prompt_filter_results"][0][
-                "content_filter_results"
-            ]
+            # Handle successful case. Azure returns some responses with a null
+            # block on the choice or the prompt, so each is checked before use.
+            choice_filters = self._require_content_filters(
+                first_choice["content_filter_results"], custom_id, "completion"
+            )
+            prompt_filter_results = result["response"]["body"]["prompt_filter_results"]
+            prompt_filters = self._require_content_filters(
+                (
+                    prompt_filter_results[0]["content_filter_results"]
+                    if prompt_filter_results
+                    else None
+                ),
+                custom_id,
+                "prompt",
+            )
 
             # Check Azure content filters
-            self._validate_content_filters(choice_filters, result["custom_id"])
-            self._validate_content_filters(prompt_filters, result["custom_id"])
-        except KeyError as e:
+            self._validate_content_filters(choice_filters, custom_id)
+            self._validate_content_filters(prompt_filters, custom_id)
+        except (KeyError, IndexError, TypeError) as e:
+            raise ValueError(f"Missing required fields in task {custom_id}: {e}") from e
+
+    @staticmethod
+    def _require_content_filters(
+        filters: Optional[Dict[str, Any]], custom_id: str, source: str
+    ) -> Dict[str, Any]:
+        """Return a content filter block, or fail when Azure left it empty.
+
+        Args:
+            filters: Content filter block as returned by Azure, possibly null
+            custom_id: Task identifier
+            source: Which block it is: "completion", "prompt" or "error"
+
+        Returns:
+            Dict[str, Any]: The non-empty content filter block
+
+        Raises:
+            ValueError: If the block is missing or null
+        """
+        if not filters:
             raise ValueError(
-                f"Missing required fields in task {result['custom_id']}: {e}"
-            ) from e
+                f"Missing {source} content filter results in task {custom_id}"
+            )
+        return filters
 
     def _validate_content_filters(
         self, filters: Dict[str, Any], custom_id: str
