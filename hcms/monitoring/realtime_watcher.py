@@ -302,6 +302,10 @@ class RealtimeConversationWatcher:
         # rating fails, that event is honoured with one more attempt, as serial
         # processing would have retried on it.
         self._retry_requested: set[BackfillProviderKey] = set()
+        # The newest target seen for a message while one of its ratings was in
+        # flight: a retry must rate the text the message has now, not the text
+        # the in-flight rating started from.
+        self._pending_targets: dict[RetryKey, MessageBackfillTarget] = {}
         self._pending_futures: set[Future[None]] = set()
         # Bounds the queue in front of the workers; the change stream cursor
         # keeps the rest of the backlog server-side.
@@ -442,7 +446,8 @@ class RealtimeConversationWatcher:
     def _backfill_step(self) -> str:
         """Fetch and rate one backfill batch.
 
-        Returns "complete" when nothing is left, "progress" when a flag was
+        Returns "complete" when nothing is left, "rescan" when a continued scan
+        ran dry and the next step starts over, "progress" when a flag was
         written, "retry_pending" when a failed target still has attempts left,
         and "no_progress" otherwise.
         """
@@ -454,6 +459,7 @@ class RealtimeConversationWatcher:
         }
         state.unresolved_provider_keys.update(exhausted_provider_keys)
 
+        started_from_beginning = state.resume_after is None
         batch = self.repository.next_backfill_batch(
             batch_size=self.backfill_batch_size,
             excluded_provider_keys=exhausted_provider_keys,
@@ -464,6 +470,12 @@ class RealtimeConversationWatcher:
         )
         state.resume_after = batch.resume_after
         if not batch.targets:
+            if not started_from_beginning:
+                # The scan moved past conversations whose ratings failed with
+                # attempts left; look at everything once more before calling
+                # the pass complete.
+                state.resume_after = None
+                return "rescan"
             state.complete = True
             self._unresolved_backfill_targets = len(state.unresolved_provider_keys)
             if self._unresolved_backfill_targets:
@@ -613,12 +625,18 @@ class RealtimeConversationWatcher:
 
         with self._lock:
             reviewer_ids: set[str] = set()
+            deferred = False
             for reviewer_id in target.missing_reviewer_ids:
                 key = (target.document_id, target.message_index, reviewer_id)
                 if key in self._in_flight:
                     self._retry_requested.add(key)
+                    deferred = True
                 else:
                     reviewer_ids.add(reviewer_id)
+            if deferred:
+                self._pending_targets[(target.document_id, target.message_index)] = (
+                    target
+                )
             if not reviewer_ids:
                 return
             keys = {
@@ -670,7 +688,10 @@ class RealtimeConversationWatcher:
         """Worker-thread body: rate one message, then free its keys and queue slot.
 
         A provider that failed while a change event for it was skipped is
-        queued once more. The retry inherits this task's queue slot, so the
+        queued once more, as is every skipped provider when that event brought
+        new content: the guarded write of the old text is rejected, so the
+        message would otherwise keep its stale flag. The retry rates the newest
+        target seen for the message. It inherits this task's queue slot, so the
         queue bound holds and no worker ever waits for a slot (which could
         deadlock with the queued work it is needed for). Each retry is bounded
         by the skipped event that requested it. Other failures go to the retry
@@ -680,25 +701,38 @@ class RealtimeConversationWatcher:
         try:
             provider_results = self.process_message_target(target)
         finally:
+            retry_key: RetryKey = (target.document_id, target.message_index)
             with self._lock:
                 self._in_flight.difference_update(keys)
+                pending_target = self._pending_targets.get(retry_key)
+                content_changed = (
+                    pending_target is not None
+                    and pending_target.content != target.content
+                )
                 retry_keys = {
                     key
                     for key in keys & self._retry_requested
-                    if not provider_results.get(key[2], False)
+                    if content_changed or not provider_results.get(key[2], False)
                 }
                 self._retry_requested.difference_update(keys)
+                others_in_flight = any(
+                    key[0] == target.document_id and key[1] == target.message_index
+                    for key in self._in_flight
+                )
+                if not others_in_flight:
+                    self._pending_targets.pop(retry_key, None)
                 self._in_flight.update(retry_keys)
             if retry_keys:
                 LOGGER.info(
-                    "Retrying %d failed rating(s) for document_id=%s message_index=%s "
-                    "requested by a change event received meanwhile",
+                    "Retrying %d rating(s) for document_id=%s message_index=%s "
+                    "requested by a change event received meanwhile%s",
                     len(retry_keys),
                     target.document_id,
                     target.message_index,
+                    " (content changed)" if content_changed else "",
                 )
                 self._submit_queued_target(
-                    target,
+                    pending_target if pending_target is not None else target,
                     {key[2] for key in retry_keys},
                     retry_keys,
                     holds_queue_slot=holds_queue_slot,
