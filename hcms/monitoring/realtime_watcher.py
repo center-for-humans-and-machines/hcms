@@ -253,7 +253,13 @@ class RealtimeConversationWatcher:
 
         Backfilled ratings are late by definition, so they count towards the
         lag summary but do not log per-message lag warnings.
+
+        On a change stream reconnect, ratings dispatched before the stream
+        failed may still be queued or running. Their writes must land before
+        targets are selected, or the same message would be rated again and the
+        later result would overwrite the first.
         """
+        self.wait_for_pending()
         self._suppress_lag_warnings = True
         try:
             self._run_startup_backfill()

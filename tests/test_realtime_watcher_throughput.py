@@ -7,8 +7,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from bson import ObjectId
 
 from hcms.database.repository import (
@@ -18,6 +20,7 @@ from hcms.database.repository import (
 )
 from hcms.monitoring.realtime_watcher import RealtimeConversationWatcher
 from tests.test_realtime_watcher import (
+    FilteringStubRepository,
     StubRepository,
     _conversation_document,
     _message,
@@ -421,3 +424,87 @@ def test_wait_for_pending_reports_timeout():
     release.set()
     assert watcher.wait_for_pending(timeout=5) is True
     watcher.shutdown()
+
+
+class _ReconnectingRepository(FilteringStubRepository):
+    """Change stream that yields one event, fails, then reconnects and exits."""
+
+    def __init__(
+        self, event: dict, targets_when_down: list[MessageBackfillTarget]
+    ) -> None:
+        super().__init__()
+        self.event = event
+        # What the backfill query returns once the stream is down: the message
+        # is in MongoDB, its rating still in flight, so the flag is not yet.
+        self.targets_when_down = targets_when_down
+        self.watch_calls = 0
+
+    def watch(self, max_await_time_ms: int = 1000):
+        _ = max_await_time_ms
+        self.watch_calls += 1
+
+        @contextmanager
+        def stream_context():
+            if self.watch_calls == 1:
+
+                def events():
+                    yield self.event
+                    self.targets = list(self.targets_when_down)
+                    raise RuntimeError("stream down")
+
+                yield events()
+            else:
+                yield iter(())
+                raise KeyboardInterrupt()
+
+        return stream_context()
+
+
+def test_reconnect_backfill_waits_for_in_flight_ratings(monkeypatch):
+    """Review on PR 92: the stream fails while a rating is still running, and
+    MongoDB does not have its flag yet when the reconnect backfill selects
+    targets. The message must not be rated a second time."""
+    document_id = ObjectId()
+    event = {
+        "operationType": "insert",
+        "fullDocument": _conversation_document(
+            document_id, "c-reconnect", [_message("hello", [])]
+        ),
+    }
+    repository = _ReconnectingRepository(
+        event,
+        targets_when_down=[
+            MessageBackfillTarget(
+                document_id=document_id,
+                message_index=0,
+                content="hello",
+                missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+            )
+        ],
+    )
+    release = threading.Event()
+    rater_calls: list[str] = []
+
+    def openai_rater(text: str):
+        rater_calls.append(text)
+        threading.Timer(0.2, release.set).start()  # the stream fails meanwhile
+        assert release.wait(timeout=5)
+        return [0]
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=openai_rater,
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+        worker_threads=2,
+        reconnect_backoff_jitter_seconds=0.0,
+    )
+    monkeypatch.setattr("hcms.monitoring.realtime_watcher.time.sleep", lambda _s: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        watcher.run()
+    watcher.shutdown()
+
+    assert repository.watch_calls == 2
+    assert rater_calls == ["hello"]
+    assert len(repository.calls) == 1
+    assert not repository.targets
