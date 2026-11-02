@@ -6,7 +6,9 @@ from enum import Enum, auto, unique
 class RegTestColumns(str, Enum):
     """Column names in RegTestProcessor."""
 
-    QUESTION = "question"
+    # Must match the ``RegTestPrompt`` field names in ``hcms.loading.models``,
+    # which is what ``load_regression_test_prompts`` returns.
+    QUESTION = "Question"
     ANSWER = "answer"
 
 
