@@ -24,11 +24,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional local dependency
     PYMONGO_CLIENT = None
 
-MONGO_URI = os.getenv("HCMS_INTEGRATION_MONGODB_URI")
+# The dev cluster the watchers use (GitHub secret MONGODB_URI_DEV); each test
+# works in its own throwaway database there. A local replica set works too.
+MONGO_URI = os.getenv("MONGODB_URI_DEV") or os.getenv("HCMS_INTEGRATION_MONGODB_URI")
 pytestmark = [
     pytest.mark.skipif(
         not MONGO_URI,
-        reason="Set HCMS_INTEGRATION_MONGODB_URI to run Mongo integration tests.",
+        reason=(
+            "Set MONGODB_URI_DEV (or HCMS_INTEGRATION_MONGODB_URI) to run Mongo "
+            "integration tests."
+        ),
     ),
     pytest.mark.skipif(
         PYMONGO_CLIENT is None,
@@ -174,3 +179,120 @@ def test_change_event_does_not_create_duplicate_provider_entries(collection):
     assert sorted(flag["reviewer_id"] for flag in reviewer_flags) == sorted(
         [SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID]
     )
+
+
+def _user_message(content: str, timestamp: datetime) -> dict[str, object]:
+    return {
+        "content": content,
+        "role": "user",
+        "timestamp": timestamp,
+        "type": "user",
+        "flagged": False,
+        "flagged_at": None,
+        "flagged_by": None,
+        "flag_category": None,
+        "flag_other_reason": None,
+        "user_flag": {"category": "", "category_other": "", "reviews": []},
+        "reviewer_flags": [],
+        "duplicate_flags": [],
+    }
+
+
+def _judge_verdict(*categories: str) -> Any:
+    # pylint: disable=import-outside-toplevel
+    from hcms.rating.ktb_judge import KtbJudgeVerdict
+
+    return KtbJudgeVerdict(categories=list(categories), rationale="because")
+
+
+def test_backfill_since_rates_a_new_message_in_an_old_conversation(collection):
+    # pylint: disable=import-outside-toplevel
+    from datetime import timedelta
+
+    from hcms.database.repository import SYSTEM_LLM_JUDGE_REVIEWER_ID
+
+    document = _conversation_doc("conversation-int-4")
+    collection.insert_one(document)
+    since = datetime.now(timezone.utc) + timedelta(seconds=1)
+    collection.update_one(
+        {"_id": document["_id"]},
+        {
+            "$push": {
+                "messages": _user_message("I want to die", since + timedelta(seconds=1))
+            }
+        },
+    )
+
+    repository = MongoConversationRepository.from_collection(collection)
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=lambda _text, **_context: _judge_verdict("Suicidal ideation"),
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_since=since,
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    # A restart after go-live: the old message stays unrated, the new one is found.
+    watcher.run_startup_backfill()
+
+    stored = collection.find_one({"_id": document["_id"]})
+    assert stored is not None
+    assert stored["messages"][0]["reviewer_flags"] == []
+    (flag,) = stored["messages"][1]["reviewer_flags"]
+    assert flag["reviewer_id"] == SYSTEM_LLM_JUDGE_REVIEWER_ID
+    assert flag["categories"] == ["Suicidal ideation"]
+    assert flag["comment"] == "because"
+
+
+def test_flag_is_not_written_for_content_changed_while_rating(collection):
+    # pylint: disable=import-outside-toplevel
+    from hcms.database.repository import SYSTEM_LLM_JUDGE_REVIEWER_ID
+
+    document = _conversation_doc("conversation-int-5")
+    collection.insert_one(document)
+    repository = MongoConversationRepository.from_collection(collection)
+    rated_texts: list[str] = []
+
+    def judge_while_message_is_merged(text: str, **_context: Any) -> Any:
+        rated_texts.append(text)
+        if len(rated_texts) == 1:
+            # The app appends to the message between our read and our write.
+            collection.update_one(
+                {"_id": document["_id"]},
+                {"$set": {"messages.0.content": "needs moderation\nand more"}},
+            )
+        return _judge_verdict("Self-harm")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=judge_while_message_is_merged,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+    )
+    stale_document = collection.find_one({"_id": document["_id"]})
+    assert stale_document is not None
+
+    watcher.handle_change_event(
+        {"operationType": "insert", "fullDocument": stale_document}
+    )
+
+    stored = collection.find_one({"_id": document["_id"]})
+    assert stored is not None
+    assert stored["messages"][0]["reviewer_flags"] == []
+
+    # The content-change event rates the final text.
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {
+                "updatedFields": {"messages.0.content": "needs moderation\nand more"},
+                "removedFields": [],
+            },
+            "fullDocument": stored,
+        }
+    )
+
+    stored = collection.find_one({"_id": document["_id"]})
+    assert stored is not None
+    (flag,) = stored["messages"][0]["reviewer_flags"]
+    assert flag["reviewer_id"] == SYSTEM_LLM_JUDGE_REVIEWER_ID
+    assert rated_texts == ["needs moderation", "needs moderation\nand more"]

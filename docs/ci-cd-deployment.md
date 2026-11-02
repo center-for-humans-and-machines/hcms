@@ -74,9 +74,10 @@ Required values:
 Fixed value:
 
 - `HCMS_MODERATION_PROVIDERS` (`openai_moderation`): the deployed watcher only
-  writes OpenAI moderation ratings. Llama Guard runs in a separate watcher on
-  the GPU host, which the cluster can't reach (see the
-  [Llama Guard watcher ADR](./adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)).
+  writes OpenAI moderation ratings. Llama Guard and the LLM judge each run in a
+  separate watcher on the GPU host, which the cluster can't reach (see the
+  [Llama Guard watcher ADR](./adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)
+  and the [LLM judge ADR](./adr/2026-11-02-llm-judge-ktb-provider.md)).
 
 Provider-specific requirement:
 

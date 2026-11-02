@@ -79,15 +79,29 @@ Use these lifecycle scripts for local MongoDB + watcher:
 
 Watcher runtime behavior:
 
-- Startup backfill retries transient provider failures (default `10` retries, `2s` between no-progress retries).
+- Work runs in bounded cycles: up to `MONGODB_LIVE_MAX_EVENTS_PER_CYCLE` live
+  events, then one due retry of a failed live rating, then one startup
+  backfill batch of `MONGODB_BACKFILL_BATCH_SIZE` messages. A live message
+  waits at most one cycle, however much history is left to backfill.
+- Startup backfill retries transient provider failures (default `10` retries, `2s` between no-progress retries)
+  and covers every unrated message, however old (every provider, the LLM judge
+  included). `MONGODB_BACKFILL_SINCE` cuts it short to messages with a
+  timestamp at or after that time; the rest are rated once with
+  `poetry run python -m hcms.monitoring.backfill_conversations --provider <name> --until <time>`.
+- A rating that fails (transport error, or model output the rater rejects) is
+  never written; it is retried with backoff and logged as an error when the
+  retry budget is spent. A flag is only written while the message still has
+  the content that was rated; a `messages.<i>.content` change rates it again.
 - Change stream reconnect uses exponential backoff with jitter (default `1s` base, `30s` max, `0.25s` jitter).
 - Logging level defaults to `INFO` and can be tuned with `HCMS_LOG_LEVEL`.
 - `HCMS_MODERATION_PROVIDERS` picks the providers a watcher runs
-  (`openai_moderation`, `llama_guard`; default both). A watcher only fills in
-  missing `reviewer_flags` entries of its own providers, so one watcher per
-  provider can run on different hosts.
+  (`openai_moderation`, `llama_guard`, `llm_judge`; default all three).
+  A watcher only fills in missing `reviewer_flags` entries of its own
+  providers, so one watcher per provider can run on different hosts.
 - Assistant replies are rated by Llama Guard together with the user message
-  they answer; user messages are rated on their own.
+  they answer; user messages are rated on their own. The LLM judge rates every
+  message with its previous 4 turns as context and stores its categories plus a
+  one-sentence rationale (`comment`).
 - Messages are rated on `HCMS_WORKER_THREADS` threads (default `4`). A message
   already queued or being rated is skipped when its change event arrives again.
 - Provider calls time out after `HCMS_PROVIDER_TIMEOUT_SECONDS` (default `30`)
@@ -102,6 +116,10 @@ Main tuning variables (set in `.env`):
 - `MONGODB_BACKFILL_BATCH_SIZE`
 - `MONGODB_BACKFILL_MAX_RETRIES`
 - `MONGODB_BACKFILL_RETRY_SLEEP_SECONDS`
+- `MONGODB_BACKFILL_SINCE`
+- `MONGODB_LIVE_MAX_EVENTS_PER_CYCLE`
+- `MONGODB_LIVE_MAX_SECONDS_PER_CYCLE`
+- `MONGODB_RETRY_MAX_PER_CYCLE`
 - `MONGODB_RECONNECT_BACKOFF_BASE_SECONDS`
 - `MONGODB_RECONNECT_BACKOFF_MAX_SECONDS`
 - `MONGODB_RECONNECT_BACKOFF_JITTER_SECONDS`
@@ -111,6 +129,29 @@ Main tuning variables (set in `.env`):
 - `HCMS_PROVIDER_TIMEOUT_SECONDS`
 - `HCMS_PROVIDER_MAX_RETRIES`
 - `HCMS_RATING_LAG_WARN_SECONDS`
+- `LLM_JUDGE_ENDPOINT`, `LLM_JUDGE_API_KEY`, `LLM_JUDGE_MODEL`, `LLM_JUDGE_TIMEOUT_SECONDS`
+
+LLM judge minimum bar: every direct disclosure, including "I want to die",
+must come back with at least one category, alone and after benign context.
+On the tower, where the model is reachable (`LLM_JUDGE_ENDPOINT`,
+`LLM_JUDGE_API_KEY`, `LLM_JUDGE_MODEL`), the uncached smoke test calls it
+directly:
+
+```sh
+poetry run python -m hcms.evaluation.ktb_judge_eval
+```
+
+Everywhere else the bar is checked the way Llama Guard is: with
+`MONGODB_URI_DEV` (and `MONGODB_DATABASE_DEV`) set, the regression suite
+inserts the sentences into the dev database, waits for the judge watcher on
+the tower to flag them, and removes them again:
+
+```sh
+./script/test -r
+```
+
+The Mongo integration tests use the same `MONGODB_URI_DEV` (or a local
+`HCMS_INTEGRATION_MONGODB_URI`) and work in throwaway databases.
 
 Connect to local MongoDB from host tools (MongoDB Compass, mongosh, app clients):
 
@@ -127,6 +168,7 @@ errors for `mongo`.
 - Architecture Decision Record (ADR) for compose split and local monitoring stack: [Compose restructure](./docs/adr/2026-03-02-compose-restructure-local-monitoring.md)
 - ADR for Mongo schema alignment and realtime watcher: [Schema and watcher](./docs/adr/2026-03-02-hcms-mongo-schema-alignment-and-realtime-monitoring.md)
 - ADR for running Llama Guard in its own watcher: [Llama Guard watcher](./docs/adr/2026-10-28-llama-guard-watcher-on-gpu-host.md)
+- ADR for the LLM judge provider (Kill The Bot categories): [LLM judge](./docs/adr/2026-11-02-llm-judge-ktb-provider.md)
 - Paper data workflow: [paper-data-workflow.md](./docs/paper-data-workflow.md)
 - CI/CD deployment: [ci-cd-deployment.md](./docs/ci-cd-deployment.md)
 - Contribution guide: [contributing.md](./contributing.md)

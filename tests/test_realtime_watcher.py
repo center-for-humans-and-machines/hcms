@@ -3,13 +3,14 @@
 # pylint: disable=missing-function-docstring,missing-class-docstring
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 # pylint: disable=use-implicit-booleaness-not-comparison,duplicate-code
-# pylint: disable=protected-access
+# pylint: disable=protected-access,too-many-lines
 
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,15 +23,20 @@ from pydantic import ValidationError
 from hcms.database.models import ConversationDocument
 from hcms.database.repository import (
     SYSTEM_LLAMA_REVIEWER_ID,
+    SYSTEM_LLM_JUDGE_REVIEWER_ID,
     SYSTEM_OPENAI_REVIEWER_ID,
+    BackfillBatch,
     MessageBackfillTarget,
     MongoConversationRepository,
 )
 from hcms.monitoring.realtime_watcher import (
+    MAX_COMMENT_LENGTH,
     RealtimeConversationWatcher,
+    normalize_ktb_judge_verdict,
     normalize_llama_guard_categories,
     normalize_openai_categories,
 )
+from hcms.rating.ktb_judge import KtbJudgeVerdict
 
 
 @dataclass
@@ -40,12 +46,21 @@ class _Call:
     reviewer_id: str
     categories: list[str]
     category_other: str
+    comment: str = ""
+    expected_content: str | None = None
 
 
 @dataclass
 class StubRepository(MongoConversationRepository):
     calls: list[_Call] = field(default_factory=list)
     backfill_batches: list[list[MessageBackfillTarget]] = field(default_factory=list)
+    invalidations: list[tuple[Any, int, set[str]]] = field(default_factory=list)
+
+    def remove_system_reviewer_flags(
+        self, document_id: Any, message_index: int, reviewer_ids: Iterable[str]
+    ) -> bool:
+        self.invalidations.append((document_id, message_index, set(reviewer_ids)))
+        return True
 
     @staticmethod
     def is_message_eligible_for_system_reviewers(message: dict[str, Any]):
@@ -70,18 +85,19 @@ class StubRepository(MongoConversationRepository):
         except ValidationError:
             return None
 
-    def get_backfill_targets(
+    def next_backfill_batch(
         self,
         batch_size: int = 200,
         excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
         reviewer_ids: set[str] | None = None,
-    ) -> list[MessageBackfillTarget]:
-        _ = batch_size
-        _ = excluded_provider_keys
-        _ = reviewer_ids
+        since: datetime | None = None,
+        until: datetime | None = None,
+        after_id: Any = None,
+    ) -> BackfillBatch:
+        _ = (batch_size, excluded_provider_keys, reviewer_ids, since, until, after_id)
         if not self.backfill_batches:
-            return []
-        return self.backfill_batches.pop(0)
+            return BackfillBatch(targets=[], resume_after=None)
+        return BackfillBatch(targets=self.backfill_batches.pop(0), resume_after=None)
 
     def upsert_system_reviewer_flag(
         self,
@@ -91,7 +107,9 @@ class StubRepository(MongoConversationRepository):
         categories: Iterable[str],
         category_other: str,
         created_at: datetime | None = None,
-    ) -> None:
+        comment: str = "",
+        expected_content: str | None = None,
+    ) -> bool:
         _ = created_at
         self.calls.append(
             _Call(
@@ -100,8 +118,11 @@ class StubRepository(MongoConversationRepository):
                 reviewer_id=reviewer_id,
                 categories=list(categories),
                 category_other=category_other,
+                comment=comment,
+                expected_content=expected_content,
             )
         )
+        return True
 
 
 @dataclass
@@ -110,12 +131,16 @@ class FilteringStubRepository(StubRepository):
 
     targets: list[MessageBackfillTarget] = field(default_factory=list)
 
-    def get_backfill_targets(
+    def next_backfill_batch(
         self,
         batch_size: int = 200,
         excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
         reviewer_ids: set[str] | None = None,
-    ) -> list[MessageBackfillTarget]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+        after_id: Any = None,
+    ) -> BackfillBatch:
+        _ = (since, until, after_id)
         excluded_provider_keys = excluded_provider_keys or set()
         eligible_targets: list[MessageBackfillTarget] = []
 
@@ -145,7 +170,7 @@ class FilteringStubRepository(StubRepository):
             if len(eligible_targets) >= batch_size:
                 break
 
-        return eligible_targets
+        return BackfillBatch(targets=eligible_targets, resume_after=None)
 
     def upsert_system_reviewer_flag(
         self,
@@ -155,7 +180,9 @@ class FilteringStubRepository(StubRepository):
         categories: Iterable[str],
         category_other: str,
         created_at: datetime | None = None,
-    ) -> None:
+        comment: str = "",
+        expected_content: str | None = None,
+    ) -> bool:
         super().upsert_system_reviewer_flag(
             document_id=document_id,
             message_index=message_index,
@@ -163,6 +190,8 @@ class FilteringStubRepository(StubRepository):
             categories=categories,
             category_other=category_other,
             created_at=created_at,
+            comment=comment,
+            expected_content=expected_content,
         )
 
         updated_targets: list[MessageBackfillTarget] = []
@@ -187,6 +216,26 @@ class FilteringStubRepository(StubRepository):
                 )
 
         self.targets = updated_targets
+        return True
+
+
+class FakeChangeStream:  # pylint: disable=too-few-public-methods
+    """Change stream stand-in: `try_next` hands out events, then idles."""
+
+    def __init__(self, events: list[dict[str, Any]]):
+        self.events = list(events)
+        self.polls = 0
+        self.alive = True
+
+    def try_next(self) -> dict[str, Any] | None:
+        self.polls += 1
+        if self.events:
+            return self.events.pop(0)
+        return None
+
+
+def _judge_verdict(*categories: str) -> KtbJudgeVerdict:
+    return KtbJudgeVerdict(categories=list(categories), rationale="because")
 
 
 class FlakyWatchRepository(StubRepository):
@@ -981,3 +1030,733 @@ def test_run_startup_backfill_ends_when_only_other_providers_are_missing():
     watcher.run_startup_backfill()
 
     assert repository.calls == []
+
+
+def _insert_event(content: str = "needs rating", role: str = "user") -> dict[str, Any]:
+    return {
+        "operationType": "insert",
+        "fullDocument": _conversation_document(
+            ObjectId(), "conversation-live", [_message(content, [], role=role)]
+        ),
+    }
+
+
+def _watcher_with_recording_judge(
+    repository: StubRepository, **kwargs: Any
+) -> tuple[RealtimeConversationWatcher, list[tuple[str, dict[str, Any]]]]:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def llm_judge_rater(text: str, **context: Any) -> KtbJudgeVerdict:
+        calls.append((text, context))
+        return _judge_verdict("Suicidal ideation")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=llm_judge_rater,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        **kwargs,
+    )
+    return watcher, calls
+
+
+def test_normalize_ktb_judge_verdict_uses_categories_and_rationale():
+    verdict = KtbJudgeVerdict(
+        categories=["Suicidal ideation", "Self-harm"],
+        rationale="  states a wish to die ",
+    )
+
+    categories, other, comment = normalize_ktb_judge_verdict(verdict)
+
+    assert categories == ["Suicidal ideation", "Self-harm"]
+    assert other == ""
+    assert comment == "states a wish to die"
+
+
+def test_normalize_ktb_judge_verdict_caps_the_comment_length():
+    verdict = KtbJudgeVerdict(categories=[], rationale="x" * (MAX_COMMENT_LENGTH + 50))
+
+    _categories, _other, comment = normalize_ktb_judge_verdict(verdict)
+
+    assert len(comment) == MAX_COMMENT_LENGTH
+
+
+@pytest.mark.parametrize("raw", ["unsafe", {"categories": []}, None, 3])
+def test_normalize_ktb_judge_verdict_rejects_anything_but_a_verdict(raw):
+    # Malformed output must stay an inference failure: a non-empty
+    # category_other would count as a safety finding on the dashboard.
+    with pytest.raises(TypeError):
+        normalize_ktb_judge_verdict(raw)
+
+
+def test_process_message_target_persists_all_three_provider_flags():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "violence"],
+        llama_guard_rater=lambda _text, **_context: "Hate",
+        llm_judge_rater=lambda _text, **_context: _judge_verdict("Self-harm"),
+        reviewer_ids={
+            SYSTEM_OPENAI_REVIEWER_ID,
+            SYSTEM_LLAMA_REVIEWER_ID,
+            SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        },
+    )
+    target = MessageBackfillTarget(
+        document_id=ObjectId(),
+        message_index=0,
+        content="test",
+        missing_reviewer_ids={
+            SYSTEM_OPENAI_REVIEWER_ID,
+            SYSTEM_LLAMA_REVIEWER_ID,
+            SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        },
+        role="user",
+    )
+
+    results = watcher.process_message_target(target)
+
+    assert results == {
+        SYSTEM_OPENAI_REVIEWER_ID: True,
+        SYSTEM_LLAMA_REVIEWER_ID: True,
+        SYSTEM_LLM_JUDGE_REVIEWER_ID: True,
+    }
+    by_reviewer_id = {call.reviewer_id: call for call in repository.calls}
+    assert by_reviewer_id[SYSTEM_LLM_JUDGE_REVIEWER_ID].categories == ["Self-harm"]
+    assert by_reviewer_id[SYSTEM_LLM_JUDGE_REVIEWER_ID].category_other == ""
+    assert by_reviewer_id[SYSTEM_LLM_JUDGE_REVIEWER_ID].comment == "because"
+    assert by_reviewer_id[SYSTEM_LLAMA_REVIEWER_ID].comment == ""
+    # Every write is conditional on the content that was rated.
+    assert {call.expected_content for call in repository.calls} == {"test"}
+
+
+def test_llm_judge_only_watcher_writes_only_its_entry():
+    repository = StubRepository()
+    watcher, _calls = _watcher_with_recording_judge(repository)
+    target = MessageBackfillTarget(
+        document_id=ObjectId(),
+        message_index=0,
+        content="I want to die",
+        missing_reviewer_ids={
+            SYSTEM_OPENAI_REVIEWER_ID,
+            SYSTEM_LLAMA_REVIEWER_ID,
+            SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        },
+        role="user",
+    )
+
+    results = watcher.process_message_target(target)
+
+    assert watcher.openai_rater is None
+    assert watcher.llama_guard_rater is None
+    assert results == {SYSTEM_LLM_JUDGE_REVIEWER_ID: True}
+    assert [call.reviewer_id for call in repository.calls] == [
+        SYSTEM_LLM_JUDGE_REVIEWER_ID
+    ]
+
+
+def test_default_providers_include_the_llm_judge():
+    def judge_rater(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        return _judge_verdict()
+
+    watcher = RealtimeConversationWatcher(
+        repository=StubRepository(),
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text, **_context: "0",
+        llm_judge_rater=judge_rater,
+    )
+
+    assert watcher.reviewer_ids == {
+        SYSTEM_OPENAI_REVIEWER_ID,
+        SYSTEM_LLAMA_REVIEWER_ID,
+        SYSTEM_LLM_JUDGE_REVIEWER_ID,
+    }
+    assert watcher.llm_judge_rater is judge_rater
+
+
+def test_llm_judge_receives_role_and_context_turns_from_change_event():
+    repository = StubRepository()
+    watcher, calls = _watcher_with_recording_judge(repository)
+    event = {
+        "operationType": "insert",
+        "fullDocument": _conversation_document(
+            ObjectId(),
+            "conversation-judge-context",
+            [
+                _message("system prompt", [], role="system"),
+                _message("Hello", [], role="user"),
+                _message("Hi, how are you?", []),
+                _message("I want to die", [], role="user"),
+            ],
+        ),
+    }
+
+    watcher.handle_change_event(event)
+
+    assert calls == [
+        ("Hello", {"role": "user", "context_messages": ()}),
+        (
+            "Hi, how are you?",
+            {"role": "assistant", "context_messages": (("user", "Hello"),)},
+        ),
+        (
+            "I want to die",
+            {
+                "role": "user",
+                "context_messages": (
+                    ("user", "Hello"),
+                    ("assistant", "Hi, how are you?"),
+                ),
+            },
+        ),
+    ]
+    assert [call.message_index for call in repository.calls] == [1, 2, 3]
+
+
+def test_invalid_judge_output_writes_nothing(caplog):
+    repository = StubRepository()
+
+    def rejecting_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        return KtbJudgeVerdict.model_validate(
+            {"categories": ["not a category"], "rationale": "x"}
+        )
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=rejecting_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+    )
+
+    with caplog.at_level("ERROR"):
+        watcher.handle_change_event(_insert_event())
+
+    assert repository.calls == []
+    assert watcher._provider_failure_counts[SYSTEM_LLM_JUDGE_REVIEWER_ID] == 1
+    assert "Failed LLM judge rating" in caplog.text
+    assert len(watcher._retry_queue) == 1
+
+
+def test_failed_live_rating_is_retried_without_a_new_event():
+    repository = StubRepository()
+    attempts = {"count": 0}
+
+    def flaky_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("model busy")
+        return _judge_verdict("Suicidal ideation")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=flaky_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.handle_change_event(_insert_event())
+    assert repository.calls == []
+    assert len(watcher._retry_queue) == 1
+
+    watcher._run_due_retries()
+
+    assert attempts["count"] == 2
+    assert [call.categories for call in repository.calls] == [["Suicidal ideation"]]
+    assert watcher._retry_queue == {}
+
+
+def test_live_retries_stop_after_the_retry_budget(caplog):
+    repository = StubRepository()
+
+    def failing_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        raise RuntimeError("always fails")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=failing_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_max_retries=2,
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.handle_change_event(_insert_event())
+    with caplog.at_level("ERROR"):
+        watcher._run_due_retries()
+
+    assert repository.calls == []
+    assert watcher._retry_queue == {}
+    assert watcher._unresolved_live_targets == 1
+    assert "Retries exhausted" in caplog.text
+
+
+def test_retry_waits_for_its_backoff_delay():
+    repository = StubRepository()
+
+    def failing_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        raise RuntimeError("always fails")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=failing_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_retry_sleep_seconds=100.0,
+    )
+
+    watcher.handle_change_event(_insert_event())
+    watcher._run_due_retries()
+
+    retry_key = next(iter(watcher._retry_queue))
+    assert watcher._retry_attempts[retry_key] == 1  # not due yet, so not retried
+
+
+def test_content_change_event_rates_an_already_flagged_message_again():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0, "hate"],
+        llama_guard_rater=lambda _text, **_context: "Hate",
+    )
+    rated = [
+        {
+            "reviewer_id": reviewer_id,
+            "reviewer_by_username": reviewer_id,
+            "created_at": "2026-03-02T00:00:00Z",
+            "categories": [],
+            "category_other": "",
+            "comment": "",
+        }
+        for reviewer_id in (SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID)
+    ]
+    document_id = ObjectId()
+    event = {
+        "operationType": "update",
+        "updateDescription": {
+            "updatedFields": {"messages.1.content": "merged text"},
+            "removedFields": [],
+        },
+        "fullDocument": _conversation_document(
+            document_id,
+            "conversation-merged",
+            [
+                _message("first", list(rated), role="user"),
+                _message("merged text", list(rated), role="user"),
+            ],
+        ),
+    }
+
+    watcher.handle_change_event(event)
+
+    assert sorted(call.reviewer_id for call in repository.calls) == sorted(
+        [SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID]
+    )
+    assert {call.message_index for call in repository.calls} == {1}
+    assert {call.expected_content for call in repository.calls} == {"merged text"}
+
+
+def test_replaced_messages_array_only_rates_messages_without_flags():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text, **_context: "0",
+    )
+    rated = [
+        {
+            "reviewer_id": reviewer_id,
+            "reviewer_by_username": reviewer_id,
+            "created_at": "2026-03-02T00:00:00Z",
+            "categories": [],
+            "category_other": "",
+            "comment": "",
+        }
+        for reviewer_id in (SYSTEM_OPENAI_REVIEWER_ID, SYSTEM_LLAMA_REVIEWER_ID)
+    ]
+    event = {
+        "operationType": "update",
+        "updateDescription": {"updatedFields": {"messages": []}, "removedFields": []},
+        "fullDocument": _conversation_document(
+            ObjectId(),
+            "conversation-replaced",
+            [_message("rated", rated, role="user"), _message("new", [], role="user")],
+        ),
+    }
+
+    watcher.handle_change_event(event)
+
+    assert {call.message_index for call in repository.calls} == {1}
+
+
+def test_cycle_bounds_live_events_then_serves_retries_and_one_backfill_batch():
+    backfill_batches = [
+        [
+            MessageBackfillTarget(
+                document_id=ObjectId(),
+                message_index=0,
+                content=f"backfill {index}",
+                missing_reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+                role="user",
+            )
+        ]
+        for index in range(5)
+    ]
+    repository = StubRepository(backfill_batches=backfill_batches)
+    watcher, calls = _watcher_with_recording_judge(
+        repository,
+        live_max_events_per_cycle=3,
+        backfill_batch_size=1,
+        backfill_retry_sleep_seconds=0.0,
+    )
+    retry_target = MessageBackfillTarget(
+        document_id=ObjectId(),
+        message_index=0,
+        content="retry me",
+        missing_reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        role="user",
+    )
+    watcher._schedule_retry(retry_target, {SYSTEM_LLM_JUDGE_REVIEWER_ID})
+    stream = FakeChangeStream([_insert_event(f"live {index}") for index in range(10)])
+
+    assert watcher._run_cycle(stream) is True
+
+    rated = [text for text, _context in calls]
+    # Three live events, then the due retry, then exactly one backfill batch,
+    # even though seven live events are still waiting.
+    assert rated == ["live 0", "live 1", "live 2", "retry me", "backfill 0"]
+    assert len(stream.events) == 7
+    assert len(repository.backfill_batches) == 4
+
+    assert watcher._run_cycle(stream) is True
+
+    rated = [text for text, _context in calls]
+    assert rated[5:] == ["live 3", "live 4", "live 5", "backfill 1"]
+
+
+def test_cycle_processes_backfill_when_no_live_event_is_pending():
+    target = MessageBackfillTarget(
+        document_id=ObjectId(),
+        message_index=0,
+        content="old message",
+        missing_reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        role="user",
+    )
+    repository = StubRepository(backfill_batches=[[target], []])
+    watcher, calls = _watcher_with_recording_judge(repository, backfill_batch_size=1)
+    stream = FakeChangeStream([])
+
+    assert watcher._run_cycle(stream) is True
+    assert watcher._run_cycle(stream) is True
+
+    assert [text for text, _context in calls] == ["old message"]
+    assert watcher._backfill.complete is True
+    assert stream.polls == 2  # one idle poll per cycle, nothing spins
+
+
+def test_cycle_pauses_backfill_after_a_failed_batch():
+    target = MessageBackfillTarget(
+        document_id=ObjectId(),
+        message_index=0,
+        content="fails",
+        missing_reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        role="user",
+    )
+    repository = StubRepository(backfill_batches=[[target], [target], []])
+
+    def failing_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        raise RuntimeError("model down")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=failing_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_batch_size=1,
+        backfill_retry_sleep_seconds=100.0,
+    )
+    stream = FakeChangeStream([])
+
+    watcher._run_cycle(stream)
+    watcher._run_cycle(stream)
+
+    # The second cycle did not ask for the same failing target again.
+    assert len(repository.backfill_batches) == 2
+
+
+def test_cycle_reports_a_closed_stream():
+    watcher, _calls = _watcher_with_recording_judge(StubRepository())
+    stream = FakeChangeStream([])
+    stream.alive = False
+
+    assert watcher._run_cycle(stream) is False
+
+
+def test_summary_log_lists_every_enabled_provider(caplog):
+    watcher = RealtimeConversationWatcher(
+        repository=StubRepository(),
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text, **_context: "0",
+        llm_judge_rater=lambda _text, **_context: _judge_verdict(),
+        summary_log_interval_events=1,
+    )
+
+    with caplog.at_level("INFO"):
+        watcher.handle_change_event(_insert_event())
+
+    summary = next(
+        record for record in caplog.records if "Watcher summary" in record.message
+    )
+    assert f"{SYSTEM_OPENAI_REVIEWER_ID}_success=1" in summary.message
+    assert f"{SYSTEM_LLAMA_REVIEWER_ID}_success=1" in summary.message
+    assert f"{SYSTEM_LLM_JUDGE_REVIEWER_ID}_success=1" in summary.message
+    assert "retry_queue=0" in summary.message
+
+
+class ContentGuardStubRepository(StubRepository):
+    """Stub whose writes honour `expected_content` against the message's current text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.current_content: dict[tuple[Any, int], str] = {}
+        self.skipped: list[str] = []
+
+    def upsert_system_reviewer_flag(self, *args: Any, **kwargs: Any) -> bool:
+        expected = kwargs.get("expected_content")
+        key = (kwargs["document_id"], kwargs["message_index"])
+        if expected is not None and self.current_content.get(key) != expected:
+            self.skipped.append(expected)
+            return False
+        return super().upsert_system_reviewer_flag(*args, **kwargs)
+
+
+def test_content_change_during_in_flight_rating_rates_the_new_text():
+    """Codex review on PR 97: a content-change event that arrives while the
+    message is being rated must not be dropped, and its retry must rate the
+    new text, since the in-flight rating's guarded write is rejected."""
+    repository = ContentGuardStubRepository()
+    started = threading.Event()
+    release = threading.Event()
+    rated: list[str] = []
+
+    def llm_judge_rater(text: str, **_context: Any) -> KtbJudgeVerdict:
+        rated.append(text)
+        if len(rated) == 1:
+            started.set()
+            assert release.wait(timeout=5)
+        return _judge_verdict("Suicidal ideation")
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=llm_judge_rater,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        worker_threads=2,
+    )
+    document_id = ObjectId()
+    repository.current_content[(document_id, 0)] = "Hello"
+    watcher.handle_change_event(
+        {
+            "operationType": "insert",
+            "fullDocument": _conversation_document(
+                document_id, "c-merge", [_message("Hello", [], role="user")]
+            ),
+        }
+    )
+    assert started.wait(timeout=5)
+
+    # The app appends to the message while it is being rated.
+    repository.current_content[(document_id, 0)] = "Hello\nI want to die"
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {
+                "updatedFields": {"messages.0.content": "Hello\nI want to die"},
+                "removedFields": [],
+            },
+            "fullDocument": _conversation_document(
+                document_id,
+                "c-merge",
+                [_message("Hello\nI want to die", [], role="user")],
+            ),
+        }
+    )
+    assert rated == ["Hello"]  # deferred: the first rating is still in flight
+
+    release.set()
+    assert watcher.wait_for_pending(timeout=5)
+    watcher.shutdown()
+
+    assert rated == ["Hello", "Hello\nI want to die"]
+    assert repository.skipped == ["Hello"]
+    assert [call.expected_content for call in repository.calls] == [
+        "Hello\nI want to die"
+    ]
+    assert not watcher._in_flight
+    assert not watcher._pending_targets
+    assert not watcher._retry_requested
+
+
+@dataclass
+class ResumingStubRepository(StubRepository):
+    """Stub scan that resumes after the last complete conversation, like Mongo."""
+
+    targets: list[MessageBackfillTarget] = field(default_factory=list)
+    fetches: list[Any] = field(default_factory=list)
+
+    def next_backfill_batch(
+        self,
+        batch_size: int = 200,
+        excluded_provider_keys: set[tuple[Any, int, str]] | None = None,
+        reviewer_ids: set[str] | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        after_id: Any = None,
+    ) -> BackfillBatch:
+        _ = (reviewer_ids, since, until)
+        self.fetches.append(after_id)
+        excluded_provider_keys = excluded_provider_keys or set()
+        batch = [
+            target
+            for target in self.targets
+            if (after_id is None or target.document_id > after_id)
+            and not all(
+                (target.document_id, target.message_index, reviewer_id)
+                in excluded_provider_keys
+                for reviewer_id in target.missing_reviewer_ids
+            )
+        ][:batch_size]
+        # A full batch stops inside its last conversation, so the scan resumes
+        # with that conversation again.
+        resume_after = batch[-2].document_id if len(batch) == batch_size > 1 else None
+        return BackfillBatch(targets=batch, resume_after=resume_after)
+
+    def upsert_system_reviewer_flag(self, *args: Any, **kwargs: Any) -> bool:
+        super().upsert_system_reviewer_flag(*args, **kwargs)
+        self.targets = [
+            target
+            for target in self.targets
+            if (target.document_id, target.message_index)
+            != (kwargs["document_id"], kwargs["message_index"])
+        ]
+        return True
+
+
+def test_backfill_rescans_from_the_start_before_completing():
+    """Codex review on PR 97: a failed target behind the resume cursor must be
+    retried before the pass is declared complete."""
+    first_id, second_id = sorted([ObjectId(), ObjectId()])
+    repository = ResumingStubRepository(
+        targets=[
+            MessageBackfillTarget(
+                document_id=first_id,
+                message_index=0,
+                content="fails once",
+                missing_reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+                role="user",
+            ),
+            MessageBackfillTarget(
+                document_id=second_id,
+                message_index=0,
+                content="fine",
+                missing_reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+                role="user",
+            ),
+        ]
+    )
+    attempts = {"count": 0}
+
+    def flaky_judge(text: str, **_context: Any) -> KtbJudgeVerdict:
+        if text == "fails once":
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("model busy")
+        return _judge_verdict()
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=flaky_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_batch_size=2,
+        backfill_retry_sleep_seconds=0.0,
+    )
+
+    watcher.run_startup_backfill()
+
+    assert attempts["count"] == 2
+    assert sorted(call.document_id for call in repository.calls) == [
+        first_id,
+        second_id,
+    ]
+    assert watcher._unresolved_backfill_targets == 0
+    assert repository.targets == []
+    # Scan from the start, continue after the first conversation, run dry,
+    # rescan from the start, then confirm from the start that nothing is left.
+    assert repository.fetches == [None, first_id, None, None]
+
+
+def test_content_change_drops_stale_flags_before_rating_again():
+    """Codex review on PR 97: if the re-rating of an edited message fails for
+    good, its old flag must not survive; dropping the stale entries first
+    makes the message count as unrated, so the backfill picks it up."""
+    repository = StubRepository()
+    order: list[str] = []
+
+    def failing_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        order.append("rated")
+        raise RuntimeError("model down")
+
+    original_invalidate = repository.remove_system_reviewer_flags
+
+    def recording_invalidate(*args: Any, **kwargs: Any) -> bool:
+        order.append("invalidated")
+        return original_invalidate(*args, **kwargs)
+
+    repository.remove_system_reviewer_flags = recording_invalidate  # type: ignore[method-assign]
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=failing_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_max_retries=1,
+        backfill_retry_sleep_seconds=0.0,
+    )
+    document_id = ObjectId()
+    stale_flag = {
+        "reviewer_id": SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        "reviewer_by_username": SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        "created_at": "2026-03-02T00:00:00Z",
+        "categories": [],
+        "category_other": "",
+        "comment": "safe small talk",
+    }
+
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {
+                "updatedFields": {"messages.0.content": "I want to die"},
+                "removedFields": [],
+            },
+            "fullDocument": _conversation_document(
+                document_id,
+                "c-stale",
+                [_message("I want to die", [stale_flag], role="user")],
+            ),
+        }
+    )
+
+    assert order == ["invalidated", "rated"]
+    assert repository.invalidations == [
+        (document_id, 0, {SYSTEM_LLM_JUDGE_REVIEWER_ID})
+    ]
+    assert repository.calls == []
+    # The retry budget is spent, but the stale entry is gone, so the next
+    # backfill sees the message as unrated.
+    assert watcher._retry_queue == {}
+    assert watcher._unresolved_live_targets == 1
+
+
+def test_insert_events_do_not_invalidate_flags():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text, **_context: "0",
+    )
+
+    watcher.handle_change_event(_insert_event())
+
+    assert repository.invalidations == []
