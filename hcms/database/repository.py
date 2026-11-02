@@ -506,6 +506,49 @@ class MongoConversationRepository:
             return False
         return True
 
+    def remove_system_reviewer_flags(
+        self,
+        document_id: Any,
+        message_index: int,
+        reviewer_ids: Iterable[str],
+    ) -> bool:
+        """Drop the given system reviewers' entries from one message.
+
+        Used when a message's content changed: its existing ratings describe
+        the old text. Without an entry the message counts as unrated again, so
+        the startup backfill finds it even if the re-rating fails for good.
+
+        Returns:
+            bool: Whether the message matched.
+        """
+        reviewer_id_list = sorted(set(reviewer_ids))
+        if not reviewer_id_list:
+            return True
+        result = self.collection.update_one(
+            {
+                "_id": document_id,
+                f"messages.{message_index}": {"$exists": True},
+            },
+            {
+                "$pull": {
+                    f"messages.{message_index}.reviewer_flags": {
+                        "reviewer_id": {"$in": reviewer_id_list}
+                    }
+                }
+            },
+        )
+        matched = getattr(result, "matched_count", None)
+        if matched == 0:
+            LOGGER.warning(
+                "Could not invalidate flags %s for document_id=%s message_index=%s: "
+                "message missing",
+                reviewer_id_list,
+                document_id,
+                message_index,
+            )
+            return False
+        return True
+
     @staticmethod
     # pylint: disable=line-too-long
     def _build_reviewer_flag_pipeline(
@@ -523,7 +566,10 @@ class MongoConversationRepository:
                         "$let": {
                             "vars": {
                                 "target_index": message_index,
-                                "new_flag": reviewer_flag,
+                                # $literal keeps model-written text such as a
+                                # rationale starting with "$" from being read
+                                # as an aggregation expression.
+                                "new_flag": {"$literal": reviewer_flag},
                             },
                             "in": {
                                 "$map": {

@@ -54,6 +54,13 @@ class _Call:
 class StubRepository(MongoConversationRepository):
     calls: list[_Call] = field(default_factory=list)
     backfill_batches: list[list[MessageBackfillTarget]] = field(default_factory=list)
+    invalidations: list[tuple[Any, int, set[str]]] = field(default_factory=list)
+
+    def remove_system_reviewer_flags(
+        self, document_id: Any, message_index: int, reviewer_ids: Iterable[str]
+    ) -> bool:
+        self.invalidations.append((document_id, message_index, set(reviewer_ids)))
+        return True
 
     @staticmethod
     def is_message_eligible_for_system_reviewers(message: dict[str, Any]):
@@ -1669,3 +1676,77 @@ def test_backfill_rescans_from_the_start_before_completing():
     # Scan from the start, continue after the first conversation, run dry,
     # rescan from the start, then confirm from the start that nothing is left.
     assert repository.fetches == [None, first_id, None, None]
+
+
+def test_content_change_drops_stale_flags_before_rating_again():
+    """Codex review on PR 97: if the re-rating of an edited message fails for
+    good, its old flag must not survive; dropping the stale entries first
+    makes the message count as unrated, so the backfill picks it up."""
+    repository = StubRepository()
+    order: list[str] = []
+
+    def failing_judge(_text: str, **_context: Any) -> KtbJudgeVerdict:
+        order.append("rated")
+        raise RuntimeError("model down")
+
+    original_invalidate = repository.remove_system_reviewer_flags
+
+    def recording_invalidate(*args: Any, **kwargs: Any) -> bool:
+        order.append("invalidated")
+        return original_invalidate(*args, **kwargs)
+
+    repository.remove_system_reviewer_flags = recording_invalidate  # type: ignore[method-assign]
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        llm_judge_rater=failing_judge,
+        reviewer_ids={SYSTEM_LLM_JUDGE_REVIEWER_ID},
+        backfill_max_retries=1,
+        backfill_retry_sleep_seconds=0.0,
+    )
+    document_id = ObjectId()
+    stale_flag = {
+        "reviewer_id": SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        "reviewer_by_username": SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        "created_at": "2026-03-02T00:00:00Z",
+        "categories": [],
+        "category_other": "",
+        "comment": "safe small talk",
+    }
+
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {
+                "updatedFields": {"messages.0.content": "I want to die"},
+                "removedFields": [],
+            },
+            "fullDocument": _conversation_document(
+                document_id,
+                "c-stale",
+                [_message("I want to die", [stale_flag], role="user")],
+            ),
+        }
+    )
+
+    assert order == ["invalidated", "rated"]
+    assert repository.invalidations == [
+        (document_id, 0, {SYSTEM_LLM_JUDGE_REVIEWER_ID})
+    ]
+    assert repository.calls == []
+    # The retry budget is spent, but the stale entry is gone, so the next
+    # backfill sees the message as unrated.
+    assert watcher._retry_queue == {}
+    assert watcher._unresolved_live_targets == 1
+
+
+def test_insert_events_do_not_invalidate_flags():
+    repository = StubRepository()
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=lambda _text: [0],
+        llama_guard_rater=lambda _text, **_context: "0",
+    )
+
+    watcher.handle_change_event(_insert_event())
+
+    assert repository.invalidations == []

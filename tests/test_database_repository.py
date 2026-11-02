@@ -144,11 +144,25 @@ class FakeCollection:
             return _UpdateResult(0)
         reviewer_flags = message["reviewer_flags"]
 
+        if isinstance(update, dict) and "$pull" in update:
+            ((path, condition),) = update["$pull"].items()
+            assert path == f"messages.{message_index}.reviewer_flags"
+            removed_ids = set(condition["reviewer_id"]["$in"])
+            message["reviewer_flags"] = [
+                flag
+                for flag in reviewer_flags
+                if flag.get("reviewer_id") not in removed_ids
+            ]
+            return _UpdateResult(1)
+
         if isinstance(update, list):
             assert len(update) == 1
             stage = update[0]
             set_messages = stage["$set"]["messages"]
-            new_flag = deepcopy(set_messages["$let"]["vars"]["new_flag"])
+            new_flag = set_messages["$let"]["vars"]["new_flag"]
+            # The flag is wrapped in $literal so model text is stored verbatim.
+            assert set(new_flag) == {"$literal"}
+            new_flag = deepcopy(new_flag["$literal"])
             target_index = set_messages["$let"]["vars"]["target_index"]
             assert target_index == message_index
             reviewer_id = new_flag["reviewer_id"]
@@ -1116,3 +1130,67 @@ def test_upsert_system_reviewer_flag_skips_a_message_whose_content_changed():
 
     assert written is False
     assert collection.docs[conversation["_id"]]["messages"][0]["reviewer_flags"] == []
+
+
+def test_reviewer_flag_pipeline_stores_model_text_literally():
+    conversation = _conversation_doc()
+    collection = FakeCollection([conversation])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    repository.upsert_system_reviewer_flag(
+        document_id=conversation["_id"],
+        message_index=0,
+        reviewer_id=SYSTEM_LLM_JUDGE_REVIEWER_ID,
+        categories=["Suicidal ideation"],
+        category_other="",
+        comment="$$NOW is when the user said it",
+    )
+
+    (flag,) = collection.docs[conversation["_id"]]["messages"][0]["reviewer_flags"]
+    assert flag["comment"] == "$$NOW is when the user said it"
+    pipeline = MongoConversationRepository._build_reviewer_flag_pipeline(  # pylint: disable=protected-access
+        message_index=0, reviewer_id="r", reviewer_flag={"comment": "$x"}
+    )
+    assert pipeline[0]["$set"]["messages"]["$let"]["vars"]["new_flag"] == {
+        "$literal": {"comment": "$x"}
+    }
+
+
+def test_remove_system_reviewer_flags_drops_only_the_given_reviewers():
+    now = datetime.now(timezone.utc)
+    conversation = _conversation_doc()
+    conversation["messages"][1]["reviewer_flags"] = _all_system_flags(now) + [
+        {
+            "reviewer_id": "reviewer-9",
+            "reviewer_by_username": "human",
+            "created_at": now,
+            "categories": ["2"],
+            "category_other": "",
+            "comment": "",
+        }
+    ]
+    collection = FakeCollection([conversation])
+    repository = MongoConversationRepository.from_collection(collection)
+
+    removed = repository.remove_system_reviewer_flags(
+        document_id=conversation["_id"],
+        message_index=1,
+        reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID, SYSTEM_LLM_JUDGE_REVIEWER_ID},
+    )
+
+    assert removed is True
+    remaining = [
+        flag["reviewer_id"]
+        for flag in collection.docs[conversation["_id"]]["messages"][1][
+            "reviewer_flags"
+        ]
+    ]
+    assert remaining == [SYSTEM_OPENAI_REVIEWER_ID, "reviewer-9"]
+    # The message now counts as unrated for the removed providers.
+    targets = repository.get_backfill_targets(
+        batch_size=10, reviewer_ids={SYSTEM_LLAMA_REVIEWER_ID}
+    )
+    assert [(t.message_index, t.missing_reviewer_ids) for t in targets] == [
+        (0, {SYSTEM_LLAMA_REVIEWER_ID}),
+        (1, {SYSTEM_LLAMA_REVIEWER_ID}),
+    ]

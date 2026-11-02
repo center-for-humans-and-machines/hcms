@@ -582,7 +582,15 @@ class RealtimeConversationWatcher:
             if message_index in content_changed_indexes:
                 # The text changed after it was rated: existing entries are
                 # stale, so every provider of this watcher rates it again.
+                # Dropping the stale entries first makes the message count as
+                # unrated, so the startup backfill finds it should the
+                # re-rating fail through its retry budget.
                 missing_reviewer_ids = set(self.reviewer_ids)
+                self.repository.remove_system_reviewer_flags(
+                    document_id=validated_document.get("_id"),
+                    message_index=message_index,
+                    reviewer_ids=missing_reviewer_ids,
+                )
             else:
                 missing_reviewer_ids = self.repository.missing_system_reviewers(
                     message, set(self.reviewer_ids)

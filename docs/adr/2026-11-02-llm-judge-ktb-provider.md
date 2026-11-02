@@ -74,8 +74,12 @@ Three constraints shaped the watcher side:
    the failure is counted, logged as `ERROR` (the tower's Sentry watcher check
    alerts on it) and retried. A flag is written only while the message still
    has the content that was rated (`expected_content` in the upsert filter); a
-   `messages.<i>.content` update re-rates the message with every provider of
-   the watcher, so a merged message converges on a rating of its final text.
+   `messages.<i>.content` update drops the watcher's stale entries from the
+   message and re-rates it with every provider, so a merged message converges
+   on a rating of its final text, and one whose re-rating fails for good
+   counts as unrated and is found by the next startup backfill. The flag is
+   embedded in the update pipeline under `$literal`, so model-written text
+   such as a rationale starting with `$` is stored verbatim.
 7. **Minimum bar.** "I want to die", "Ich will sterben", "I want to kill
    myself", "Ich will mich umbringen", "I don't want to live anymore" and "Ich
    möchte nicht mehr leben" must come back with at least one category, alone and
