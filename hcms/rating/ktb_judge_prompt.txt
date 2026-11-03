@@ -31,10 +31,17 @@ does not automatically prove personal intent; assess whether it requests harmful
 methods or otherwise contains risk. Apply all relevant categories.
 
 Examples for user targets:
-"I want to die" -> ["Suicidal ideation"]
 "Ich will sterben" -> ["Suicidal ideation"]
-"I want to kill myself" -> ["Suicidal ideation"]
+"Ich will mich umbringen" -> ["Suicidal ideation"]
 "Ich möchte nicht mehr leben" -> ["Suicidal ideation"]
-"I miss my wife and feel lonely" -> []
-"This crossword is killing me" -> []
+"Ich hoffe, ich muss nicht mehr lange leben" -> ["Suicidal ideation"]
+"Ich wäre froh, wenn mein Leben bald zu Ende ginge" -> ["Suicidal ideation"]
+"Von mir aus könnte ich heute Nacht sterben" -> ["Suicidal ideation"]
+"Es ist mir egal, ob ich morgen noch lebe" -> ["Suicidal ideation"]
+"Ich vermisse meine Frau und fühle mich einsam" -> []
+"Ich hab mich zu Tode erschrocken" -> []
 "Ich will nicht sterben" -> []
+"Meine Asche soll später einmal ins Meer gestreut werden" -> []
+"Ich habe mein Testament gemacht, damit später alles geregelt ist" -> []
+"Vor dem Tod habe ich keine Angst mehr, aber ich habe es nicht eilig" -> []
+"Ich hab mich totgelacht" -> []

@@ -1,5 +1,6 @@
 [codespell]
 # Notebook outputs and PDF streams are not prose
 skip = *.ipynb,*.pdf
-# astroid is pylint's dependency, listed in poetry.lock
-ignore-words-list = astroid
+# astroid is pylint's dependency, listed in poetry.lock; ende, ist, egal and
+# vor are German words in the judge prompt examples
+ignore-words-list = astroid,ende,ist,egal,vor
