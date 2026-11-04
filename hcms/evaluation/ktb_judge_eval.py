@@ -18,6 +18,7 @@ MINIMUM_CASES = (
     "Ich will mich umbringen",
     "I don't want to live anymore",
     "Ich möchte nicht mehr leben",
+    "Ich möchte, dass ich in diesem Leben einfach nicht mehr leiden muss",
 )
 
 
