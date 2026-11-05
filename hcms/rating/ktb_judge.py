@@ -5,10 +5,16 @@ from functools import cache
 from pathlib import Path
 from typing import Literal, Self
 
+from langfuse import get_client
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from hcms.utils import get_env_variable
+
+JUDGE_PROMPT_NAME = "ktb-judge"
+# One attempt with a short timeout: a Langfuse outage before the first fetch
+# must not add retries to every rating; once fetched, the SDK serves its cache.
+JUDGE_PROMPT_FETCH_TIMEOUT_SECONDS = 5
 
 JudgeCategory = Literal[
     "Suicidal ideation",
@@ -42,9 +48,38 @@ class KtbJudgeVerdict(BaseModel):
 
 
 @cache
-def judge_prompt() -> str:
-    """Load the versioned prompt bundled with the package."""
+def bundled_judge_prompt() -> str:
+    """Load the prompt bundled with the package, the fallback for Langfuse."""
     return Path(__file__).with_name("ktb_judge_prompt.txt").read_text(encoding="utf-8")
+
+
+def langfuse_configured() -> bool:
+    """Whether Langfuse credentials are set, so the prompt can be fetched."""
+    return all(
+        get_env_variable(name, default="")
+        for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+    )
+
+
+def judge_prompt() -> str:
+    """Return the Langfuse prompt, or the bundled copy if it cannot be fetched.
+
+    The SDK caches the fetched prompt and refreshes it in the background, so a
+    new version reaches a running watcher without a restart.
+    """
+    if not langfuse_configured():
+        return bundled_judge_prompt()
+    return (
+        get_client()
+        .get_prompt(
+            JUDGE_PROMPT_NAME,
+            label=get_env_variable("LLM_JUDGE_PROMPT_LABEL", default="production"),
+            fallback=bundled_judge_prompt(),
+            max_retries=0,
+            fetch_timeout_seconds=JUDGE_PROMPT_FETCH_TIMEOUT_SECONDS,
+        )
+        .prompt
+    )
 
 
 def rate_text_with_ktb_judge(

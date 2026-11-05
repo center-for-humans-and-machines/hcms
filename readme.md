@@ -130,6 +130,7 @@ Main tuning variables (set in `.env`):
 - `HCMS_PROVIDER_MAX_RETRIES`
 - `HCMS_RATING_LAG_WARN_SECONDS`
 - `LLM_JUDGE_ENDPOINT`, `LLM_JUDGE_API_KEY`, `LLM_JUDGE_MODEL`, `LLM_JUDGE_TIMEOUT_SECONDS`
+- `LLM_JUDGE_PROMPT_LABEL`
 
 LLM judge minimum bar: every direct disclosure, including "I want to die",
 must come back with at least one category, alone and after benign context.
