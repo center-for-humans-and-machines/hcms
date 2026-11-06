@@ -49,6 +49,9 @@ Paper dataset generation and evaluation instructions are documented in:
   ./script/test -r
   ```
 
+  The batch regression test runs against Azure OpenAI, whose responses
+  carry the content-filter blocks it inspects: copy `.env.azure` into `.env`.
+
 ### Local monitoring stack
 
 Use these lifecycle scripts for local MongoDB + watcher:
