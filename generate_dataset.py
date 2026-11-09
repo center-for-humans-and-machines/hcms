@@ -25,6 +25,9 @@ from hcms.monitoring.processors import (
 )
 from hcms.utils import UTF_8, get_env_variable
 
+# Observations per request when summing the cost of a trace.
+OBSERVATIONS_PAGE_SIZE = 100
+
 
 def read_lines(file_path: Path) -> List[str]:
     """Read file lines into a list of strings.
@@ -81,16 +84,23 @@ async def get_cost_per_conversation(trace_id: Optional[str]) -> float:
         # Initialize Langfuse client
         langfuse = get_client()
 
-        # Retrieve the trace using the trace_id
-        trace = await langfuse.async_api.trace.get(trace_id)
-
-        # Get the total cost from the trace
-        # Langfuse stores cost information in the trace's total_cost field
-        if trace and hasattr(trace, "total_cost") and trace.total_cost is not None:
-            return float(trace.total_cost)
-
-        # If no cost information is available, return 0.0
-        return 0.0
+        # SDK v5 has no trace endpoint: the cost of a trace is the sum of
+        # the costs of its observations, read page by page.
+        total_cost = 0.0
+        cursor: Optional[str] = None
+        while True:
+            page = await langfuse.async_api.observations.get_many(
+                trace_id=trace_id,
+                fields="core,usage",
+                limit=OBSERVATIONS_PAGE_SIZE,
+                cursor=cursor,
+            )
+            total_cost += sum(
+                observation.total_cost or 0.0 for observation in page.data
+            )
+            cursor = page.meta.cursor
+            if not cursor:
+                return total_cost
     except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Error retrieving cost for trace {trace_id}: {e}")
         return 0.0
