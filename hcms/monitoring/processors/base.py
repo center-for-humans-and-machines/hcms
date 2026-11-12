@@ -141,9 +141,14 @@ class BaseProcessor(ABC):
             bool: True if all results are valid
 
         Raises:
-            ValueError: If any result fails validation or row count mismatch
+            ValueError: If any result fails validation or row count mismatch,
+                or if the endpoint is neither Azure nor OpenAI
         """
-        validation_errors = []
+        if not (self.config.is_endpoint_azure or self.config.is_endpoint_openai):
+            raise ValueError("Invalid endpoint type. Must be either Azure or OpenAI.")
+
+        validation_errors: List[str] = []
+        failed_task_ids: set[str] = set()
 
         # Validate row count
         if len(results) != self._num_rows:
@@ -153,24 +158,12 @@ class BaseProcessor(ABC):
             )
 
         for result in results:
-            try:
-                # Common validations
-                self._validate_common_fields(result)
+            task_errors = self._validate_result(result)
+            if task_errors:
+                failed_task_ids.add(result["custom_id"])
+                validation_errors.extend(task_errors)
 
-                # Provider-specific validations
-                if self.config.is_endpoint_azure:
-                    self._validate_azure_specific(result)
-                elif self.config.is_endpoint_openai:
-                    pass
-                else:
-                    validation_errors.append(
-                        "Invalid endpoint type. Must be either Azure or OpenAI."
-                    )
-            except ValueError as e:
-                validation_errors.append(str(e))
-
-        # Count number of errors and report total number of successful and failed tasks
-        summary = self._count_task_results(validation_errors, results)
+        summary = self._count_task_results(failed_task_ids, results)
 
         if validation_errors:
             raise ValueError(
@@ -179,33 +172,68 @@ class BaseProcessor(ABC):
 
         return True
 
+    def _validate_result(self, result: Dict[str, Any]) -> List[str]:
+        """Collect every validation error of one result.
+
+        The common checks and the provider checks run independently, so a
+        rejected prompt reports both its status code and its filter verdict.
+        A result whose shape a check cannot read is reported as malformed, so
+        one bad line does not abort the report on all the others.
+
+        Args:
+            result: Single result dictionary
+
+        Returns:
+            List[str]: Validation error messages, empty if the result is valid
+        """
+        errors: List[str] = []
+        for validate in (self._validate_common_fields, self._validate_provider):
+            try:
+                validate(result)
+            except ValueError as e:
+                errors.append(str(e))
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
+                malformed = (
+                    f"Malformed result in task {result['custom_id']}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                # Both checks read the same fields and can fail the same way
+                if malformed not in errors:
+                    errors.append(malformed)
+        return errors
+
+    def _validate_provider(self, result: Dict[str, Any]) -> None:
+        """Run the provider-specific checks; OpenAI has none.
+
+        Args:
+            result: Single result dictionary
+
+        Raises:
+            ValueError: If validation fails
+        """
+        if self.config.is_endpoint_azure:
+            self._validate_azure_specific(result)
+
+    @staticmethod
     def _count_task_results(
-        self, validation_errors: List[str], results: List[Dict[str, Any]]
+        failed_task_ids: set[str], results: List[Dict[str, Any]]
     ) -> str:
         """Count successful and failed tasks.
 
+        Error entries from the batch job are part of ``results`` and fail the
+        common checks, so they are counted once, through ``failed_task_ids``.
+
         Args:
-            validation_errors: List of validation error messages
+            failed_task_ids: Identifiers of the results with validation errors
             results: List of processing results
 
         Returns:
             str: Summary of successful and failed tasks
         """
-        task_ids = set()
-        for error in validation_errors:
-            if "task" in error:
-                task_id = error.split("task")[1].split(":")[0].strip()
-                task_ids.add(task_id)
-
-        batch_job = self._batch_processor.batch_job
-        if batch_job:
-            errors = self._batch_processor.retrieve_errors(
-                batch_job=batch_job, job_id=batch_job.id
-            )
-        else:
-            errors = []
-        num_failed_tasks = len(task_ids) + len(errors)
-        num_successful_tasks = len(results) - len(task_ids)
+        num_failed_tasks = len(failed_task_ids)
+        num_successful_tasks = sum(
+            1 for result in results if result["custom_id"] not in failed_task_ids
+        )
 
         return (
             f"\nTask Summary:\n"
@@ -274,8 +302,11 @@ class BaseProcessor(ABC):
                     f"Unexpected finish reason in task {result['custom_id']}: "
                     f"{first_choice['finish_reason']}"
                 )
-        except KeyError:
-            pass  # Error case already handled above
+        except (KeyError, IndexError, TypeError):
+            # A failed request has no choice to read and is reported above.
+            # Without such a report the result is malformed; the caller says so.
+            if not errors:
+                raise
 
         if errors:
             raise ValueError("\n".join(errors))
@@ -289,32 +320,83 @@ class BaseProcessor(ABC):
         Raises:
             ValueError: If validation fails
         """
+        custom_id = result["custom_id"]
         try:
             first_choice = self._get_first_choice(result)
 
             # Handle error case with content filter results
             if "innererror" in first_choice:
-                content_filter_result = first_choice["innererror"][
-                    "content_filter_result"
-                ]
                 self._validate_content_filters(
-                    content_filter_result, result["custom_id"]
+                    self._require_content_filters(
+                        first_choice["innererror"]["content_filter_result"],
+                        custom_id,
+                        "error",
+                    ),
+                    custom_id,
                 )
                 return
 
-            # Handle successful case
-            choice_filters = first_choice["content_filter_results"]
-            prompt_filters = result["response"]["body"]["prompt_filter_results"][0][
-                "content_filter_results"
-            ]
+            # A failed request without filter details (e.g. a server error) has
+            # nothing Azure-specific to inspect; the common checks report it.
+            if result["error"] is not None:
+                return
 
-            # Check Azure content filters
-            self._validate_content_filters(choice_filters, result["custom_id"])
-            self._validate_content_filters(prompt_filters, result["custom_id"])
-        except KeyError as e:
+            # Handle successful case. Azure returns some responses with a null
+            # block on the choice or the prompt, so each is checked before use.
+            # An absent block is read as a null one.
+            prompt_filter_results = result["response"]["body"].get(
+                "prompt_filter_results"
+            )
+            first_prompt = prompt_filter_results[0] if prompt_filter_results else None
+            blocks = {
+                "completion": first_choice.get("content_filter_results"),
+                "prompt": (
+                    first_prompt.get("content_filter_results") if first_prompt else None
+                ),
+            }
+
+            # Check Azure content filters, each block on its own: a null
+            # completion block must not hide the verdict on the prompt.
+            errors: List[str] = []
+            for source, filters in blocks.items():
+                try:
+                    self._validate_content_filters(
+                        self._require_content_filters(filters, custom_id, source),
+                        custom_id,
+                    )
+                except ValueError as e:
+                    errors.append(str(e))
+                except KeyError as e:
+                    errors.append(f"Missing required fields in task {custom_id}: {e}")
+            if errors:
+                raise ValueError("\n".join(errors))
+        except (KeyError, IndexError) as e:
+            raise ValueError(f"Missing required fields in task {custom_id}: {e}") from e
+
+    @staticmethod
+    def _require_content_filters(
+        filters: Optional[Dict[str, Any]], custom_id: str, source: str
+    ) -> Dict[str, Any]:
+        """Return a content filter block, or fail when Azure left it null.
+
+        An empty block is accepted: it lists no filters to check.
+
+        Args:
+            filters: Content filter block as returned by Azure, possibly null
+            custom_id: Task identifier
+            source: Which block it is: "completion", "prompt" or "error"
+
+        Returns:
+            Dict[str, Any]: The content filter block
+
+        Raises:
+            ValueError: If the block is missing or null
+        """
+        if filters is None:
             raise ValueError(
-                f"Missing required fields in task {result['custom_id']}: {e}"
-            ) from e
+                f"Missing {source} content filter results in task {custom_id}"
+            )
+        return filters
 
     def _validate_content_filters(
         self, filters: Dict[str, Any], custom_id: str
@@ -329,6 +411,10 @@ class BaseProcessor(ABC):
             ValueError: If validation fails
         """
         for filter_name, filter_data in filters.items():
+            if not isinstance(filter_data, dict):
+                raise ValueError(
+                    f"Missing {filter_name} filter result in task {custom_id}"
+                )
             if filter_name == "jailbreak":
                 if filter_data["detected"]:
                     raise ValueError(f"Jailbreak attempt detected in task {custom_id}")
