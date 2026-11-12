@@ -180,9 +180,19 @@ def _null_prompt_entry(result: Dict[str, Any]) -> None:
     result["response"]["body"]["prompt_filter_results"] = [None]
 
 
+def _absent_prompt_list(result: Dict[str, Any]) -> None:
+    del result["response"]["body"]["prompt_filter_results"]
+
+
 @pytest.mark.parametrize(
     "mutate",
-    [_null_prompt_block, _null_prompt_list, _empty_prompt_list, _null_prompt_entry],
+    [
+        _null_prompt_block,
+        _null_prompt_list,
+        _empty_prompt_list,
+        _null_prompt_entry,
+        _absent_prompt_list,
+    ],
 )
 def test_missing_prompt_filter_block_is_a_validation_error(
     tmp_path, monkeypatch, mutate: Callable[[Dict[str, Any]], None]
@@ -194,6 +204,43 @@ def test_missing_prompt_filter_block_is_a_validation_error(
     message = _validation_message(processor, [result])
 
     assert "Missing prompt content filter results in task task-7" in message
+
+
+def test_null_choice_block_does_not_hide_the_prompt_verdict(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+    prompt_filters = {
+        **SAFE_PROMPT_FILTERS,
+        "jailbreak": {"detected": True, "filtered": False},
+    }
+
+    message = _validation_message(processor, [_output("task-5", None, prompt_filters)])
+
+    assert "Missing completion content filter results in task task-5" in message
+    assert "Jailbreak attempt detected in task task-5" in message
+    assert "Number of failed tasks: 1" in message
+
+
+def test_absent_choice_block_does_not_hide_the_prompt_verdict(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+    result = _output("task-5", SAFE_CHOICE_FILTERS, SELF_HARM_FILTERS)
+    del result["response"]["body"]["choices"][0]["content_filter_results"]
+
+    message = _validation_message(processor, [result])
+
+    assert "Missing completion content filter results in task task-5" in message
+    assert "self_harm filter triggered in task task-5" in message
+
+
+def test_field_missing_in_one_block_does_not_hide_the_other(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+    choice_filters = {"hate": {"filtered": False}}
+
+    message = _validation_message(
+        processor, [_output("task-5", choice_filters, SELF_HARM_FILTERS)]
+    )
+
+    assert "Missing required fields in task task-5: 'severity'" in message
+    assert "self_harm filter triggered in task task-5" in message
 
 
 def test_null_filter_entry_names_the_filter(tmp_path, monkeypatch):

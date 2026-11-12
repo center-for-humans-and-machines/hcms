@@ -343,20 +343,33 @@ class BaseProcessor(ABC):
 
             # Handle successful case. Azure returns some responses with a null
             # block on the choice or the prompt, so each is checked before use.
-            choice_filters = self._require_content_filters(
-                first_choice["content_filter_results"], custom_id, "completion"
+            # An absent block is read as a null one.
+            prompt_filter_results = result["response"]["body"].get(
+                "prompt_filter_results"
             )
-            prompt_filter_results = result["response"]["body"]["prompt_filter_results"]
             first_prompt = prompt_filter_results[0] if prompt_filter_results else None
-            prompt_filters = self._require_content_filters(
-                first_prompt["content_filter_results"] if first_prompt else None,
-                custom_id,
-                "prompt",
-            )
+            blocks = {
+                "completion": first_choice.get("content_filter_results"),
+                "prompt": (
+                    first_prompt.get("content_filter_results") if first_prompt else None
+                ),
+            }
 
-            # Check Azure content filters
-            self._validate_content_filters(choice_filters, custom_id)
-            self._validate_content_filters(prompt_filters, custom_id)
+            # Check Azure content filters, each block on its own: a null
+            # completion block must not hide the verdict on the prompt.
+            errors: List[str] = []
+            for source, filters in blocks.items():
+                try:
+                    self._validate_content_filters(
+                        self._require_content_filters(filters, custom_id, source),
+                        custom_id,
+                    )
+                except ValueError as e:
+                    errors.append(str(e))
+                except KeyError as e:
+                    errors.append(f"Missing required fields in task {custom_id}: {e}")
+            if errors:
+                raise ValueError("\n".join(errors))
         except (KeyError, IndexError) as e:
             raise ValueError(f"Missing required fields in task {custom_id}: {e}") from e
 
