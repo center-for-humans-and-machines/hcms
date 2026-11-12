@@ -177,6 +177,8 @@ class BaseProcessor(ABC):
 
         The common checks and the provider checks run independently, so a
         rejected prompt reports both its status code and its filter verdict.
+        A result whose shape a check cannot read is reported as malformed, so
+        one bad line does not abort the report on all the others.
 
         Args:
             result: Single result dictionary
@@ -190,6 +192,14 @@ class BaseProcessor(ABC):
                 validate(result)
             except ValueError as e:
                 errors.append(str(e))
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
+                malformed = (
+                    f"Malformed result in task {result['custom_id']}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                # Both checks read the same fields and can fail the same way
+                if malformed not in errors:
+                    errors.append(malformed)
         return errors
 
     def _validate_provider(self, result: Dict[str, Any]) -> None:
@@ -292,8 +302,11 @@ class BaseProcessor(ABC):
                     f"Unexpected finish reason in task {result['custom_id']}: "
                     f"{first_choice['finish_reason']}"
                 )
-        except KeyError:
-            pass  # Error case already handled above
+        except (KeyError, IndexError, TypeError):
+            # A failed request has no choice to read and is reported above.
+            # Without such a report the result is malformed; the caller says so.
+            if not errors:
+                raise
 
         if errors:
             raise ValueError("\n".join(errors))

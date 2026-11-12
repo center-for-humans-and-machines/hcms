@@ -240,6 +240,77 @@ def test_server_error_entry_reports_only_the_request_failure(tmp_path, monkeypat
     assert "Missing" not in message
 
 
+def _empty_choices(result: Dict[str, Any]) -> None:
+    result["response"]["body"]["choices"] = []
+
+
+def _null_body(result: Dict[str, Any]) -> None:
+    result["response"]["body"] = None
+
+
+@pytest.mark.parametrize("endpoint", [AZURE_ENDPOINT, OPENAI_ENDPOINT])
+@pytest.mark.parametrize("mutate", [_empty_choices, _null_body])
+def test_malformed_output_is_reported_next_to_the_other_results(
+    tmp_path, monkeypatch, endpoint: str, mutate: Callable[[Dict[str, Any]], None]
+):
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=2)
+    malformed = _good_output("task-1")
+    mutate(malformed)
+
+    message = _validation_message(processor, [_good_output("task-0"), malformed])
+
+    assert message.count("Malformed result in task task-1") == 1
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
+
+
+def test_filter_block_of_the_wrong_type_is_reported(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=2)
+    malformed = _good_output("task-1")
+    malformed["response"]["body"]["choices"][0]["content_filter_results"] = []
+
+    message = _validation_message(processor, [_good_output("task-0"), malformed])
+
+    assert "Malformed result in task task-1: AttributeError" in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
+
+
+def test_rejected_prompt_with_null_innererror_is_reported(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+    result = _filtered_error("task-35", SELF_HARM_FILTERS)
+    result["error"]["message"]["error"]["innererror"] = None
+
+    message = _validation_message(processor, [result])
+
+    assert "Failed request for task task-35: status code 400" in message
+    assert f"Error in task task-35: {FILTERED_MESSAGE}" in message
+    assert "Malformed result in task task-35" in message
+
+
+def test_failed_request_with_the_error_in_the_body_reports_its_status(
+    tmp_path, monkeypatch
+):
+    """The OpenAI shape of a failed request; synthetic, not from a live run."""
+    processor = _processor(tmp_path, monkeypatch, OPENAI_ENDPOINT, num_rows=2)
+    failed_request = {
+        "custom_id": "task-1",
+        "response": {
+            "request_id": "req_1",
+            "status_code": 400,
+            "body": {"error": {"message": "Invalid request", "type": "invalid"}},
+        },
+        "error": None,
+    }
+
+    message = _validation_message(processor, [_good_output("task-0"), failed_request])
+
+    assert "Failed request for task task-1: status code 400" in message
+    assert "Malformed" not in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
+
+
 def test_count_mismatch_is_reported_with_the_summary(tmp_path, monkeypatch):
     processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=2)
 
