@@ -50,7 +50,10 @@ Paper dataset generation and evaluation instructions are documented in:
   ```
 
   The batch regression test runs against Azure OpenAI, whose responses
-  carry the content-filter blocks it inspects: copy `.env.azure` into `.env`.
+  carry the content-filter blocks it inspects. Set the Azure values in `.env`:
+  `MODEL_ENDPOINT`, `MODEL_API_KEY`, `MODEL_API_VERSION` and `BATCH_MODEL_NAME`
+  (the batch deployment); `env.example` describes them. `.env.azure` is a
+  local, untracked copy of these values, not a file in the repository.
 
 ### Local monitoring stack
 
