@@ -1,4 +1,7 @@
-# .github/CODEOWNERS (or place in /CODEOWNERS or docs/CODEOWNERS)
+# .github/CODEOWNERS
+#
+# One reviewer per PR. GitHub never requests the PR author, so on a
+# "@rodrigobdz @chaee" line Rodrigo's PRs go to Chaewon and Chaewon's
+# to Rodrigo. Do not list more than these two people on one line.
 
-# Everything in the repo → requests review from these users
-* @rodrigobdz @alidasmeh
+* @rodrigobdz @chaee
