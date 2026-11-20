@@ -54,22 +54,22 @@ class BatchConfig(FileValidatorMixin):
     @property
     def is_endpoint_azure(self) -> bool:
         """Check if the endpoint is an Azure endpoint."""
-        return "azure" in self.endpoint
+        return "azure" in str(self.endpoint).lower()
 
     @property
     def is_endpoint_together(self) -> bool:
         """Check if the endpoint is an together.ai endpoint."""
-        return "together" in self.endpoint
+        return "together" in str(self.endpoint).lower()
 
     @property
     def is_endpoint_openai(self) -> bool:
         """Check if the endpoint is an OpenAI endpoint."""
-        return not self.is_endpoint_azure and "openai" in self.endpoint
+        return not self.is_endpoint_azure and "openai" in str(self.endpoint).lower()
 
     @property
     def is_endpoint_google_openai(self) -> bool:
         """Check if the endpoint is an OpenAI-compatible Google endpoint."""
-        return self.is_endpoint_openai and "google" in self.endpoint
+        return self.is_endpoint_openai and "google" in str(self.endpoint).lower()
 
     @field_validator("output_dir")
     @classmethod

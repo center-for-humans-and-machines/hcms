@@ -629,3 +629,16 @@ def test_unknown_endpoint_is_rejected_before_the_batch_is_submitted(
 
     assert not submitted
     assert not (processor.config.output_dir / "batch_requests.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    "endpoint", ["https://Example.OpenAI.Azure.com/", "https://API.OpenAI.com/"]
+)
+def test_endpoint_type_ignores_case_like_the_client(
+    tmp_path, monkeypatch, endpoint: str
+):
+    """``create_client`` lower-cases the endpoint, so the check must too."""
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=1)
+
+    assert processor.config.is_endpoint_azure == ("azure" in endpoint.lower())
+    assert processor.validate_results([_good_output("task-0")])
