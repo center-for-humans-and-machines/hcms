@@ -642,3 +642,27 @@ def test_endpoint_type_ignores_case_like_the_client(
 
     assert processor.config.is_endpoint_azure == ("azure" in endpoint.lower())
     assert processor.validate_results([_good_output("task-0")])
+
+
+def test_rejected_prompt_with_the_error_in_the_body_reports_its_filter(
+    tmp_path, monkeypatch
+):
+    """Synthetic: the filter details of a rejected prompt, read from the body."""
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+    line_error = _filtered_error("task-35", SELF_HARM_FILTERS)
+    rejected = {
+        "custom_id": "task-35",
+        "response": {
+            "request_id": "req_1",
+            "status_code": 400,
+            "body": {"error": line_error["error"]["message"]["error"]},
+        },
+        "error": None,
+    }
+
+    message = _validation_message(processor, [rejected])
+
+    assert "Failed request for task task-35: status code 400" in message
+    assert f"Error in task task-35: {FILTERED_MESSAGE}" in message
+    assert "self_harm filter triggered in task task-35" in message
+    assert "Malformed" not in message
