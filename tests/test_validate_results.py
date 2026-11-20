@@ -155,12 +155,6 @@ def test_azure_results_with_filter_blocks_pass(tmp_path, monkeypatch):
     assert processor.validate_results([_good_output("task-0"), _good_output("task-1")])
 
 
-def test_empty_filter_block_lists_nothing_to_check(tmp_path, monkeypatch):
-    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
-
-    assert processor.validate_results([_output("task-0", {}, SAFE_PROMPT_FILTERS)])
-
-
 def test_null_choice_filter_block_is_a_validation_error(tmp_path, monkeypatch):
     processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
 
@@ -169,6 +163,26 @@ def test_null_choice_filter_block_is_a_validation_error(tmp_path, monkeypatch):
     )
 
     assert "Missing completion content filter results in task task-5" in message
+
+
+@pytest.mark.parametrize(
+    ("result", "source"),
+    [
+        (_output("task-0", {}, SAFE_PROMPT_FILTERS), "completion"),
+        (_output("task-0", SAFE_CHOICE_FILTERS, {}), "prompt"),
+        (_filtered_error("task-0", {}), "error"),
+    ],
+)
+def test_empty_filter_block_fails_like_a_null_one(
+    tmp_path, monkeypatch, result: Dict[str, Any], source: str
+):
+    """An empty block carries no verdict, so the task cannot count as clean."""
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+
+    message = _validation_message(processor, [result])
+
+    assert f"Missing {source} content filter results in task task-0" in message
+    assert "Number of failed tasks: 1" in message
 
 
 def _null_prompt_block(result: Dict[str, Any]) -> None:

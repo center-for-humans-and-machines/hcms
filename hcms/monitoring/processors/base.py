@@ -306,7 +306,8 @@ class BaseProcessor(ABC):
     def _validate_filter_block(self, filters: Any, task: str, source: str) -> List[str]:
         """Validate one content filter block, which Azure can leave null.
 
-        An empty block is accepted: it lists no filters to check.
+        An empty block fails like a null one: neither carries a verdict, so
+        the task cannot count as clean.
 
         Args:
             filters: Content filter block as returned by Azure, in any shape
@@ -316,7 +317,7 @@ class BaseProcessor(ABC):
         Returns:
             List[str]: Validation error messages, empty if the block is valid
         """
-        if filters is None:
+        if filters is None or filters == {}:
             return [f"Missing {source} content filter results in task {task}"]
         if not isinstance(filters, dict):
             return [
