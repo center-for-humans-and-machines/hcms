@@ -33,6 +33,11 @@ SELF_HARM_FILTERS: Dict[str, Any] = {
     **SAFE_PROMPT_FILTERS,
     "self_harm": {"filtered": True, "severity": "medium"},
 }
+BLOCKLISTS_CLEAN: Dict[str, Any] = {"filtered": False, "details": []}
+BLOCKLISTS_HIT: Dict[str, Any] = {
+    "filtered": True,
+    "details": [{"filtered": True, "id": "blocklist-1"}],
+}
 FILTERED_MESSAGE = (
     "The response was filtered due to the prompt triggering Azure OpenAI's "
     "content management policy. Please modify your prompt and retry."
@@ -233,14 +238,33 @@ def test_absent_choice_block_does_not_hide_the_prompt_verdict(tmp_path, monkeypa
 
 def test_field_missing_in_one_block_does_not_hide_the_other(tmp_path, monkeypatch):
     processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
-    choice_filters = {"hate": {"filtered": False}}
+    choice_filters = {"hate": {"severity": "safe"}}
 
     message = _validation_message(
         processor, [_output("task-5", choice_filters, SELF_HARM_FILTERS)]
     )
 
-    assert "Missing required fields in task task-5: 'severity'" in message
+    assert "Missing required fields in task task-5: 'filtered'" in message
     assert "self_harm filter triggered in task task-5" in message
+
+
+def test_filter_without_severity_passes_unless_filtered(tmp_path, monkeypatch):
+    """Azure reports blocklists as ``{"filtered": ..., "details": [...]}``."""
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=2)
+    clean = {**SAFE_PROMPT_FILTERS, "custom_blocklists": BLOCKLISTS_CLEAN}
+    blocked = {**SAFE_PROMPT_FILTERS, "custom_blocklists": BLOCKLISTS_HIT}
+
+    assert processor.validate_results(
+        [_output("task-0", clean, clean), _output("task-1", clean, clean)]
+    )
+
+    message = _validation_message(
+        processor, [_output("task-0", clean, clean), _output("task-1", clean, blocked)]
+    )
+
+    assert "custom_blocklists filter triggered in task task-1" in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
 
 
 def test_null_filter_entry_names_the_filter(tmp_path, monkeypatch):

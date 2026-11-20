@@ -426,7 +426,8 @@ class BaseProcessor(ABC):
                     raise ValueError(
                         f"{filter_name} filter triggered in task {custom_id}"
                     )
-                if filter_data["severity"] not in ["safe", "low"]:
+                # Some filters, like custom_blocklists, report no severity
+                if filter_data.get("severity", "safe") not in ["safe", "low"]:
                     raise ValueError(
                         f"{filter_name} has concerning severity in task {custom_id}"
                     )
