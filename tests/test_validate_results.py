@@ -38,6 +38,9 @@ BLOCKLISTS_HIT: Dict[str, Any] = {
     "filtered": True,
     "details": [{"filtered": True, "id": "blocklist-1"}],
 }
+EXPIRED_MESSAGE = (
+    "This request could not be executed before the completion window expired."
+)
 FILTERED_MESSAGE = (
     "The response was filtered due to the prompt triggering Azure OpenAI's "
     "content management policy. Please modify your prompt and retry."
@@ -335,14 +338,21 @@ def test_malformed_output_is_reported_next_to_the_other_results(
     assert "Number of failed tasks: 1" in message
 
 
-def test_filter_block_of_the_wrong_type_is_reported(tmp_path, monkeypatch):
+@pytest.mark.parametrize("block", [[], "safe", 0])
+def test_filter_block_of_the_wrong_type_does_not_hide_the_prompt_verdict(
+    tmp_path, monkeypatch, block: Any
+):
     processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=2)
-    malformed = _good_output("task-1")
-    malformed["response"]["body"]["choices"][0]["content_filter_results"] = []
+    malformed = _output("task-1", SAFE_CHOICE_FILTERS, SELF_HARM_FILTERS)
+    malformed["response"]["body"]["choices"][0]["content_filter_results"] = block
 
     message = _validation_message(processor, [_good_output("task-0"), malformed])
 
-    assert "Malformed result in task task-1: AttributeError" in message
+    assert (
+        "Malformed completion content filter results in task task-1: "
+        f"expected an object, got {type(block).__name__}"
+    ) in message
+    assert "self_harm filter triggered in task task-1" in message
     assert "Number of successful tasks: 1" in message
     assert "Number of failed tasks: 1" in message
 
@@ -356,14 +366,16 @@ def test_rejected_prompt_with_null_innererror_is_reported(tmp_path, monkeypatch)
 
     assert "Failed request for task task-35: status code 400" in message
     assert f"Error in task task-35: {FILTERED_MESSAGE}" in message
-    assert "Malformed result in task task-35" in message
+    assert "Missing error content filter results in task task-35" in message
+    assert "Malformed" not in message
 
 
-def test_failed_request_with_the_error_in_the_body_reports_its_status(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("endpoint", [AZURE_ENDPOINT, OPENAI_ENDPOINT])
+def test_failed_request_with_the_error_in_the_body_reports_it_once(
+    tmp_path, monkeypatch, endpoint: str
 ):
-    """The OpenAI shape of a failed request; synthetic, not from a live run."""
-    processor = _processor(tmp_path, monkeypatch, OPENAI_ENDPOINT, num_rows=2)
+    """A failed request with the error in the body; synthetic, not from a live run."""
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=2)
     failed_request = {
         "custom_id": "task-1",
         "response": {
@@ -377,9 +389,85 @@ def test_failed_request_with_the_error_in_the_body_reports_its_status(
     message = _validation_message(processor, [_good_output("task-0"), failed_request])
 
     assert "Failed request for task task-1: status code 400" in message
+    assert "Error in task task-1: Invalid request" in message
     assert "Malformed" not in message
+    assert "Missing" not in message
     assert "Number of successful tasks: 1" in message
     assert "Number of failed tasks: 1" in message
+
+
+@pytest.mark.parametrize("endpoint", [AZURE_ENDPOINT, OPENAI_ENDPOINT])
+def test_openai_error_line_reports_the_provider_message(
+    tmp_path, monkeypatch, endpoint: str
+):
+    """The OpenAI shape of an error line: no response, a string message."""
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=2)
+    expired = {
+        "id": "batch_req_1",
+        "custom_id": "task-1",
+        "response": None,
+        "error": {"code": "batch_expired", "message": EXPIRED_MESSAGE},
+    }
+
+    message = _validation_message(processor, [_good_output("task-0"), expired])
+
+    assert f"Error in task task-1: {EXPIRED_MESSAGE}" in message
+    assert "Malformed" not in message
+    assert "status code" not in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
+
+
+@pytest.mark.parametrize("endpoint", [AZURE_ENDPOINT, OPENAI_ENDPOINT])
+def test_result_without_status_or_error_is_malformed(
+    tmp_path, monkeypatch, endpoint: str
+):
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=1)
+    result = {"custom_id": "task-0", "response": None, "error": None}
+
+    message = _validation_message(processor, [result])
+
+    assert "Malformed result in task task-0: no status code" in message
+
+
+@pytest.mark.parametrize("endpoint", [AZURE_ENDPOINT, OPENAI_ENDPOINT])
+def test_result_without_custom_id_does_not_abort_the_report(
+    tmp_path, monkeypatch, endpoint: str
+):
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=4)
+    clean_without_id = _good_output("task-1")
+    del clean_without_id["custom_id"]
+    failed_without_id = _server_error("task-2")
+    del failed_without_id["custom_id"]
+
+    results: List[Any] = [
+        _good_output("task-0"),
+        clean_without_id,
+        failed_without_id,
+        None,
+    ]
+
+    message = _validation_message(processor, results)
+
+    assert "Missing custom_id in result 2 of 4" in message
+    assert "Missing custom_id in result 3 of 4" in message
+    assert "Missing custom_id in result 4 of 4" in message
+    assert "Failed request for task <unknown>: status code 500" in message
+    assert "Malformed result in task <unknown>: no status code" in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 3" in message
+
+
+def test_a_bug_in_a_check_is_not_reported_as_a_malformed_result(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
+
+    def _buggy_check(_result: Any) -> List[str]:
+        raise TypeError("a bug in the check")
+
+    monkeypatch.setattr(processor, "_validate_common_fields", _buggy_check)
+
+    with pytest.raises(TypeError, match="a bug in the check"):
+        processor.validate_results([_good_output("task-0")])
 
 
 def test_count_mismatch_is_reported_with_the_summary(tmp_path, monkeypatch):
