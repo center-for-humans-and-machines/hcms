@@ -1,6 +1,7 @@
 """Base class for processing data using batch processing."""
 
 from abc import ABC
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
@@ -172,6 +173,18 @@ class BaseProcessor(ABC):
                 failed_task_ids.add(result.custom_id)
             validation_errors.extend(task_errors)
 
+        # A task with several lines (in one file, or in both the outputs and
+        # the errors file) has no single result to trust
+        lines_per_task = Counter(
+            result.custom_id for result in batch_results if result.custom_id is not None
+        )
+        for custom_id, num_lines in lines_per_task.items():
+            if num_lines > 1:
+                failed_task_ids.add(custom_id)
+                validation_errors.append(
+                    f"Duplicate results for task {custom_id}: {num_lines} lines"
+                )
+
         summary = self._count_task_results(failed_task_ids, batch_results)
 
         if validation_errors:
@@ -207,25 +220,25 @@ class BaseProcessor(ABC):
     ) -> str:
         """Count successful and failed tasks.
 
-        Error entries from the batch job are part of ``results`` and fail the
-        common checks, so they are counted once, through ``failed_task_ids``.
-        A result without ``custom_id`` cannot be matched to a task and counts
-        as a failed one.
+        Tasks are counted by their ``custom_id``, so a task with several
+        result lines counts once. Error entries from the batch job are part
+        of ``results`` and fail the common checks, so they are counted through
+        ``failed_task_ids``. A result without ``custom_id`` cannot be matched
+        to a task and counts as a failed one.
 
         Args:
-            failed_task_ids: Identifiers of the results with validation errors
+            failed_task_ids: Identifiers of the tasks with validation errors
             results: List of batch results
 
         Returns:
             str: Summary of successful and failed tasks
         """
+        task_ids = {
+            result.custom_id for result in results if result.custom_id is not None
+        }
         num_unidentified = sum(1 for result in results if result.custom_id is None)
         num_failed_tasks = len(failed_task_ids) + num_unidentified
-        num_successful_tasks = sum(
-            1
-            for result in results
-            if result.custom_id is not None and result.custom_id not in failed_task_ids
-        )
+        num_successful_tasks = len(task_ids - failed_task_ids)
 
         return (
             f"\nTask Summary:\n"

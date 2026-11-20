@@ -547,6 +547,35 @@ def test_count_mismatch_is_reported_with_the_summary(tmp_path, monkeypatch):
     assert "Number of failed tasks: 0" in message
 
 
+def test_task_in_both_files_is_reported_and_counted_once(tmp_path, monkeypatch):
+    """A task with an output line and an error line is one failed task."""
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=3)
+    results = [
+        _good_output("task-0"),
+        _good_output("task-1"),
+        _server_error("task-1"),
+    ]
+
+    message = _validation_message(processor, results)
+
+    assert "Duplicate results for task task-1: 2 lines" in message
+    assert "Failed request for task task-1: status code 500" in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
+
+
+def test_clean_task_listed_twice_is_reported(tmp_path, monkeypatch):
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=3)
+    results = [_good_output("task-0"), _good_output("task-1"), _good_output("task-1")]
+
+    message = _validation_message(processor, results)
+
+    assert "Duplicate results for task task-1: 2 lines" in message
+    assert "Duplicate results for task task-0" not in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 1" in message
+
+
 def test_live_run_shape_reports_every_finding(tmp_path, monkeypatch):
     """100 inputs, 100 results: 90 clean, 9 with a null choice block, 1 rejected."""
     processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=100)
