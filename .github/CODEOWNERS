@@ -1,4 +1,7 @@
-# .github/CODEOWNERS (or place in /CODEOWNERS or docs/CODEOWNERS)
+# .github/CODEOWNERS
+#
+# One reviewer for PRs that Rodrigo or Chaewon opens: GitHub never requests
+# the PR author, so Rodrigo's PRs go to Chaewon and Chaewon's to Rodrigo.
+# PRs from anyone else, Dependabot included, request both.
 
-# Everything in the repo → requests review from these users
-* @rodrigobdz @alidasmeh
+* @rodrigobdz @chaee
