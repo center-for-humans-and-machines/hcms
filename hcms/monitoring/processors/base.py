@@ -103,7 +103,13 @@ class BaseProcessor(ABC):
 
         Returns:
             List[Dict]: Processing results
+
+        Raises:
+            ValueError: If the endpoint is neither Azure nor OpenAI
         """
+        # Fail on a misconfigured endpoint before the batch is paid for
+        self._require_supported_endpoint()
+
         # Load data
         df: pl.DataFrame = self.config.data_loader(self.config.input_file)
 
@@ -133,6 +139,15 @@ class BaseProcessor(ABC):
 
         return results
 
+    def _require_supported_endpoint(self) -> None:
+        """Reject an endpoint the batch client and the validation do not know.
+
+        Raises:
+            ValueError: If the endpoint is neither Azure nor OpenAI
+        """
+        if not (self.config.is_endpoint_azure or self.config.is_endpoint_openai):
+            raise ValueError("Invalid endpoint type. Must be either Azure or OpenAI.")
+
     def validate_results(self, results: List[Dict[str, Any]]) -> bool:
         """Validate results of the batch processing.
 
@@ -148,8 +163,7 @@ class BaseProcessor(ABC):
             ValueError: If any result fails validation or row count mismatch,
                 or if the endpoint is neither Azure nor OpenAI
         """
-        if not (self.config.is_endpoint_azure or self.config.is_endpoint_openai):
-            raise ValueError("Invalid endpoint type. Must be either Azure or OpenAI.")
+        self._require_supported_endpoint()
 
         validation_errors: List[str] = []
         failed_task_ids: set[str] = set()

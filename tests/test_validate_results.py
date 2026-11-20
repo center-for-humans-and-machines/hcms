@@ -613,3 +613,19 @@ def test_unknown_endpoint_is_rejected_before_any_result(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="Invalid endpoint type"):
         processor.validate_results([])
+
+
+def test_unknown_endpoint_is_rejected_before_the_batch_is_submitted(
+    tmp_path, monkeypatch
+):
+    """A misconfigured endpoint must not cost a batch run."""
+    processor = _processor(tmp_path, monkeypatch, UNKNOWN_ENDPOINT, num_rows=0)
+    processor.config.input_file.write_text('[{"question": "Hi"}]', encoding="utf-8")
+    submitted: List[Path] = []
+    monkeypatch.setattr(processor._batch_processor, "submit_batch", submitted.append)
+
+    with pytest.raises(ValueError, match="Invalid endpoint type"):
+        processor.process_batch()
+
+    assert not submitted
+    assert not (processor.config.output_dir / "batch_requests.jsonl").exists()
