@@ -17,8 +17,16 @@ from hcms.loading.constants import (
     DATASET_DIR,
 )
 from hcms.loading.models import ConversationType
-from hcms.monitoring.processors import InSilicoConversationProcessor
+from hcms.monitoring.processors import (
+    InSilicoConversationProcessor,
+    TooManyFailedConversationsError,
+    check_failed_conversation_share,
+    get_max_failed_conversation_share,
+)
 from hcms.utils import UTF_8, get_env_variable
+
+# Observations per request when summing the cost of a trace.
+OBSERVATIONS_PAGE_SIZE = 100
 
 
 def read_lines(file_path: Path) -> List[str]:
@@ -76,16 +84,23 @@ async def get_cost_per_conversation(trace_id: Optional[str]) -> float:
         # Initialize Langfuse client
         langfuse = get_client()
 
-        # Retrieve the trace using the trace_id
-        trace = await langfuse.async_api.trace.get(trace_id)
-
-        # Get the total cost from the trace
-        # Langfuse stores cost information in the trace's total_cost field
-        if trace and hasattr(trace, "total_cost") and trace.total_cost is not None:
-            return float(trace.total_cost)
-
-        # If no cost information is available, return 0.0
-        return 0.0
+        # SDK v5 has no trace endpoint: the cost of a trace is the sum of
+        # the costs of its observations, read page by page.
+        total_cost = 0.0
+        cursor: Optional[str] = None
+        while True:
+            page = await langfuse.async_api.observations.get_many(
+                trace_id=trace_id,
+                fields="core,usage",
+                limit=OBSERVATIONS_PAGE_SIZE,
+                cursor=cursor,
+            )
+            total_cost += sum(
+                observation.total_cost or 0.0 for observation in page.data
+            )
+            cursor = page.meta.cursor
+            if not cursor:
+                return total_cost
     except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Error retrieving cost for trace {trace_id}: {e}")
         return 0.0
@@ -93,9 +108,25 @@ async def get_cost_per_conversation(trace_id: Optional[str]) -> float:
 
 # pylint: disable-next=too-many-locals
 async def generate_dataset(
-    round_number: int, max_turns: int, tags: Optional[List[str]] = None
+    round_number: int,
+    max_turns: int,
+    tags: Optional[List[str]] = None,
+    max_failed_share: float = 0.0,
 ):
-    """Generate dataset for specified round and model."""
+    """Generate dataset for specified round and model.
+
+    Args:
+        round_number: Dataset round whose conversation starters to run.
+        max_turns: Number of turns per conversation.
+        tags: Langfuse tags for the conversation traces.
+        max_failed_share: Share of conversations (0 to 1) the model may reject
+            before the run fails. Rejected conversations are left out of the
+            dataset.
+
+    Raises:
+        TooManyFailedConversationsError: If more conversations were rejected
+            than ``max_failed_share`` tolerates.
+    """
     model_id: str = get_env_variable("CHAT_COMPLETIONS_MODEL_NAME")
 
     # Replace forward slashes with underscores in model_id
@@ -117,6 +148,7 @@ async def generate_dataset(
     conversation_starters = get_conversation_starters(round_number)
 
     # Run all starters
+    failed_conversations = 0
     for i, starter in tqdm(
         enumerate(conversation_starters),
         total=len(conversation_starters),
@@ -125,6 +157,13 @@ async def generate_dataset(
         # Create processor instance
         processor = InSilicoConversationProcessor(max_turns=max_turns, tags=tags)
         await processor.simulate_conversation(starter)
+        if processor.session.failed:
+            # Logged by the processor; stop early once the run cannot pass.
+            failed_conversations += 1
+            check_failed_conversation_share(
+                failed_conversations, len(conversation_starters), max_failed_share
+            )
+            continue
         conversation = [processor.get_conversation_history()]
 
         df = pl.DataFrame(
@@ -153,6 +192,11 @@ async def generate_dataset(
         with open(dataset_pickle_name, "wb") as f:
             pickle.dump(all_dataframes, f)
 
+    if not all_dataframes:
+        raise TooManyFailedConversationsError(
+            f"All {len(conversation_starters)} conversations failed"
+        )
+
     # Concatenate all dataframes first
     final_dataset = pl.concat(all_dataframes, how="vertical")
 
@@ -175,6 +219,7 @@ async def generate_dataset(
 
     # Display info about the dataset
     print(f"\nTotal conversations: {len(final_dataset)}")
+    print(f"Failed conversations: {failed_conversations}/{len(conversation_starters)}")
     print(f"Round: {round_number}")
     print(f"Model: {model_id}")
 
@@ -201,7 +246,12 @@ async def main():
     if args.tag:
         tag = [args.tag]
 
-    await generate_dataset(args.round_number, max_turns=5, tags=tag)
+    await generate_dataset(
+        args.round_number,
+        max_turns=5,
+        tags=tag,
+        max_failed_share=get_max_failed_conversation_share(),
+    )
 
 
 if __name__ == "__main__":

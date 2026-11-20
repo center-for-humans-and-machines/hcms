@@ -1,5 +1,6 @@
 """Class to simulate conversation between clinician and companion using agents."""
 
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -29,6 +30,72 @@ os.environ["AZURE_OPENAI_ENDPOINT"] = get_env_variable("MODEL_ENDPOINT")
 # Initialize Langfuse client
 langfuse = get_client()
 
+logger = logging.getLogger(__name__)
+
+# Share of conversations (0 to 1) a dataset generation run may lose to requests
+# the chat completions API rejects before the run itself fails.
+MAX_FAILED_CONVERSATION_SHARE_ENV = "HCMS_MAX_FAILED_CONVERSATION_SHARE"
+DEFAULT_MAX_FAILED_CONVERSATION_SHARE = "0.1"
+
+
+class TooManyFailedConversationsError(RuntimeError):
+    """Raised when more conversations failed than a run tolerates."""
+
+
+def parse_max_failed_conversation_share(value: str) -> float:
+    """Parse the tolerated share of failed conversations.
+
+    Args:
+        value: The raw setting, a number between 0 and 1 inclusive.
+
+    Returns:
+        float: The tolerated share of failed conversations.
+
+    Raises:
+        ValueError: If the value is not a number between 0 and 1.
+    """
+    try:
+        share = float(value)
+    except ValueError as error:
+        raise ValueError(
+            f"{MAX_FAILED_CONVERSATION_SHARE_ENV} must be a number between 0 and 1, "
+            f"got {value!r}"
+        ) from error
+    if not 0.0 <= share <= 1.0:
+        raise ValueError(
+            f"{MAX_FAILED_CONVERSATION_SHARE_ENV} must be between 0 and 1, got {value!r}"
+        )
+    return share
+
+
+def get_max_failed_conversation_share() -> float:
+    """Read the tolerated share of failed conversations from the environment."""
+    return parse_max_failed_conversation_share(
+        get_env_variable(
+            MAX_FAILED_CONVERSATION_SHARE_ENV, DEFAULT_MAX_FAILED_CONVERSATION_SHARE
+        )
+    )
+
+
+def check_failed_conversation_share(failed: int, total: int, max_share: float) -> None:
+    """Fail the run once more conversations failed than it tolerates.
+
+    Args:
+        failed: Number of conversations that failed so far.
+        total: Number of conversations the run attempts in all.
+        max_share: Tolerated share of failed conversations, between 0 and 1.
+
+    Raises:
+        TooManyFailedConversationsError: If the share of failed conversations
+            exceeds ``max_share``.
+    """
+    if total <= 0 or failed <= max_share * total:
+        return
+    raise TooManyFailedConversationsError(
+        f"{failed} of {total} conversations failed, more than the tolerated "
+        f"{max_share:.0%} ({MAX_FAILED_CONVERSATION_SHARE_ENV})"
+    )
+
 
 # pylint: disable=too-few-public-methods
 class ModelConfig(BaseModel):
@@ -49,6 +116,8 @@ class SessionInfo(BaseModel):
     updated_at: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     trace_id: Optional[str] = None
+    failed: bool = False
+    failure_reason: Optional[str] = None
 
 
 # pylint: disable-next=too-few-public-methods
@@ -301,6 +370,25 @@ class InSilicoConversationProcessor:
 
         return message
 
+    def _record_failed_conversation(self, error: openai.BadRequestError) -> None:
+        """Record that the model rejected a request, ending this conversation.
+
+        A malformed-request error (HTTP 400) is deterministic, so it is not
+        retried; the conversation is marked failed and the run moves on.
+
+        Args:
+            error: The error the chat completions API answered with.
+        """
+        self.session.failed = True
+        self.session.failure_reason = str(error)
+        self.session.updated_at = self._get_timestamp()
+        logger.error(
+            "Conversation %s failed: model %s rejected the request: %s",
+            self.session.session_id,
+            self.model_config.model,
+            error,
+        )
+
     def _print_conversation_message(self, role: str, content: str) -> None:
         """Print a conversation message with role formatting."""
         if self.print_conversation:
@@ -399,6 +487,9 @@ class InSilicoConversationProcessor:
                         )
                         self.session.updated_at = self._get_timestamp()
                         break
+                    except openai.BadRequestError as e:
+                        self._record_failed_conversation(e)
+                        break
 
                     # Check if this is the last turn - if so, don't get clinician response
                     if turn == self.max_turns - 1:
@@ -416,6 +507,9 @@ class InSilicoConversationProcessor:
                             f"\nConversation ended early due to user response error: {e}"
                         )
                         self.session.updated_at = self._get_timestamp()
+                        break
+                    except openai.BadRequestError as e:
+                        self._record_failed_conversation(e)
                         break
 
                     self.session.updated_at = self._get_timestamp()

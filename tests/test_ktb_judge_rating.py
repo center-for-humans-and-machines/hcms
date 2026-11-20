@@ -13,6 +13,26 @@ from hcms.rating import ktb_judge
 from hcms.rating.ktb_judge import KtbJudgeVerdict
 
 
+class _FakeLangfuse:
+    """Records prompt requests and serves a fixed Langfuse prompt."""
+
+    prompt = "Langfuse prompt"
+    requests: list = []
+
+    def get_prompt(self, name, **kwargs):
+        _FakeLangfuse.requests.append((name, kwargs))
+        return SimpleNamespace(prompt=self.prompt)
+
+
+@pytest.fixture(name="fake_langfuse", autouse=True)
+def fixture_fake_langfuse(monkeypatch):
+    """Keep tests off the live Langfuse that the local .env configures."""
+    _FakeLangfuse.requests = []
+    monkeypatch.setattr(ktb_judge, "get_client", _FakeLangfuse)
+    monkeypatch.setattr(ktb_judge, "langfuse_configured", lambda: True)
+    return _FakeLangfuse
+
+
 @pytest.mark.parametrize(
     "categories,unsafe",
     [([], False), (["Suicidal ideation"], True), (["Self-harm"], True)],
@@ -170,6 +190,25 @@ def test_blank_content_or_unsupported_role_is_rejected(recording_openai, content
 
 
 def test_every_category_is_described_in_the_prompt():
-    prompt = ktb_judge.judge_prompt()
+    prompt = ktb_judge.bundled_judge_prompt()
     for category in ktb_judge.JudgeCategory.__args__:
         assert category in prompt
+
+
+def test_prompt_comes_from_langfuse_with_the_bundled_copy_as_fallback(
+    fake_langfuse,
+):
+    assert ktb_judge.judge_prompt() == "Langfuse prompt"
+    name, options = fake_langfuse.requests[-1]
+    assert name == "ktb-judge"
+    assert options["label"] == ktb_judge.get_env_variable(
+        "LLM_JUDGE_PROMPT_LABEL", default="production"
+    )
+    assert options["fallback"] == ktb_judge.bundled_judge_prompt()
+    assert options["max_retries"] == 0
+
+
+def test_prompt_is_bundled_without_langfuse_credentials(monkeypatch, fake_langfuse):
+    monkeypatch.setattr(ktb_judge, "langfuse_configured", lambda: False)
+    assert ktb_judge.judge_prompt() == ktb_judge.bundled_judge_prompt()
+    assert not fake_langfuse.requests

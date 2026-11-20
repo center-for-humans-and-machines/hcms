@@ -459,10 +459,12 @@ class RealtimeConversationWatcher:
         }
         state.unresolved_provider_keys.update(exhausted_provider_keys)
 
+        with self._lock:
+            in_flight_keys = set(self._in_flight)
         started_from_beginning = state.resume_after is None
         batch = self.repository.next_backfill_batch(
             batch_size=self.backfill_batch_size,
-            excluded_provider_keys=exhausted_provider_keys,
+            excluded_provider_keys=exhausted_provider_keys | in_flight_keys,
             reviewer_ids=set(self.reviewer_ids),
             since=self.backfill_since,
             until=self.backfill_until,
@@ -470,6 +472,10 @@ class RealtimeConversationWatcher:
         )
         state.resume_after = batch.resume_after
         if not batch.targets:
+            with self._lock:
+                if in_flight_keys or self._in_flight:
+                    state.resume_after = None
+                    return "retry_pending"
             if not started_from_beginning:
                 # The scan moved past conversations whose ratings failed with
                 # attempts left; look at everything once more before calling
@@ -490,26 +496,15 @@ class RealtimeConversationWatcher:
                 )
             return "complete"
 
-        eligible_targets: list[MessageBackfillTarget] = []
-        for target in batch.targets:
-            eligible_reviewer_ids: set[str] = set()
-            for reviewer_id in target.missing_reviewer_ids:
-                key = (target.document_id, target.message_index, reviewer_id)
-                if state.attempts.get(key, 0) >= self.backfill_max_retries:
-                    state.unresolved_provider_keys.add(key)
-                    continue
-                eligible_reviewer_ids.add(reviewer_id)
-
-            if not eligible_reviewer_ids:
-                continue
-
-            eligible_targets.append(
-                dataclasses.replace(target, missing_reviewer_ids=eligible_reviewer_ids)
-            )
+        eligible_targets, reserved_keys = self._reserve_backfill_targets(batch.targets)
 
         progress_made = False
         retry_pending = False
-        batch_results = self._process_targets(eligible_targets)
+        try:
+            batch_results = self._process_targets(eligible_targets)
+        finally:
+            with self._lock:
+                self._in_flight.difference_update(reserved_keys)
         for target, provider_results in zip(eligible_targets, batch_results):
             for reviewer_id in target.missing_reviewer_ids:
                 key = (target.document_id, target.message_index, reviewer_id)
@@ -542,6 +537,35 @@ class RealtimeConversationWatcher:
         return "no_progress"
 
     # pylint: enable=too-many-branches
+
+    def _reserve_backfill_targets(
+        self, targets: list[MessageBackfillTarget]
+    ) -> tuple[list[MessageBackfillTarget], set[BackfillProviderKey]]:
+        """Reserve missing provider keys that no live worker is rating."""
+        state = self._backfill
+        eligible_targets: list[MessageBackfillTarget] = []
+        reserved_keys: set[BackfillProviderKey] = set()
+        with self._lock:
+            for target in targets:
+                eligible_reviewer_ids: set[str] = set()
+                for reviewer_id in target.missing_reviewer_ids:
+                    key = (target.document_id, target.message_index, reviewer_id)
+                    if state.attempts.get(key, 0) >= self.backfill_max_retries:
+                        state.unresolved_provider_keys.add(key)
+                        continue
+                    if key in self._in_flight:
+                        continue
+                    eligible_reviewer_ids.add(reviewer_id)
+                    reserved_keys.add(key)
+
+                if eligible_reviewer_ids:
+                    eligible_targets.append(
+                        dataclasses.replace(
+                            target, missing_reviewer_ids=eligible_reviewer_ids
+                        )
+                    )
+            self._in_flight.update(reserved_keys)
+        return eligible_targets, reserved_keys
 
     def handle_change_event(self, change_event: dict[str, Any]) -> None:
         """Handle one MongoDB change stream event."""
@@ -612,11 +636,18 @@ class RealtimeConversationWatcher:
                     messages, message_index
                 ),
             )
+            if message_index in content_changed_indexes:
+                retry_key = (target.document_id, target.message_index)
+                with self._lock:
+                    self._retry_queue.pop(retry_key, None)
+                    self._retry_attempts.pop(retry_key, None)
             self._dispatch_target(target)
 
         self._maybe_log_summary()
 
-    def _dispatch_target(self, target: MessageBackfillTarget) -> None:
+    def _dispatch_target(
+        self, target: MessageBackfillTarget, *, is_retry: bool = False
+    ) -> None:
         """Rate a message inline, or on a worker thread when several are configured.
 
         With worker threads, providers already queued or in flight for the same
@@ -641,7 +672,7 @@ class RealtimeConversationWatcher:
                     deferred = True
                 else:
                     reviewer_ids.add(reviewer_id)
-            if deferred:
+            if deferred and not is_retry:
                 self._pending_targets[(target.document_id, target.message_index)] = (
                     target
                 )
@@ -751,6 +782,7 @@ class RealtimeConversationWatcher:
                 target,
                 provider_results,
                 excluded_reviewer_ids={key[2] for key in retry_keys},
+                retry_target=pending_target if content_changed else None,
             )
 
     def _settle_live_result(
@@ -758,6 +790,7 @@ class RealtimeConversationWatcher:
         target: MessageBackfillTarget,
         provider_results: ProviderResultMap,
         excluded_reviewer_ids: Optional[set[str]] = None,
+        retry_target: Optional[MessageBackfillTarget] = None,
     ) -> None:
         """Queue the providers that failed for a retry, or clear the message's record."""
         failed_reviewer_ids = {
@@ -767,7 +800,7 @@ class RealtimeConversationWatcher:
         } - (excluded_reviewer_ids or set())
         retry_key: RetryKey = (target.document_id, target.message_index)
         if failed_reviewer_ids:
-            self._schedule_retry(target, failed_reviewer_ids)
+            self._schedule_retry(retry_target or target, failed_reviewer_ids)
             return
         with self._lock:
             if retry_key not in self._retry_queue:
@@ -829,7 +862,7 @@ class RealtimeConversationWatcher:
                 for key in due_keys[: self.retry_max_per_cycle]
             ]
         for entry in due_entries:
-            self._dispatch_target(entry.target)
+            self._dispatch_target(entry.target, is_retry=True)
 
     def _discard_pending_future(self, future: Future[None]) -> None:
         with self._lock:
@@ -1013,6 +1046,8 @@ class RealtimeConversationWatcher:
                     target.document_id,
                     target.message_index,
                 )
+            if persisted is False:
+                return False
             with self._lock:
                 self._provider_success_counts[reviewer_id] += 1
             # Lag counts the write too: the rating is late until it is stored.

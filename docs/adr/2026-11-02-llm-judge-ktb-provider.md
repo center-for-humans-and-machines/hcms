@@ -38,8 +38,10 @@ Three constraints shaped the watcher side:
 1. **Provider `llm_judge`, reviewer ID `system_llm_judge`.** A small instruct
    model (Gemma 4 E4B, Q4_0 QAT GGUF; E2B as fallback) served CPU-only by a
    second llama.cpp `llama-server` on the tower, so Llama Guard keeps the GPU.
-   `hcms/rating/ktb_judge.py` sends the prompt in `ktb_judge_prompt.txt` plus a
-   JSON transcript of the previous four turns and the target message, at
+   `hcms/rating/ktb_judge.py` sends the Langfuse prompt `ktb-judge` (label
+   `LLM_JUDGE_PROMPT_LABEL`, default `production`; the bundled
+   `ktb_judge_prompt.txt` if Langfuse is not configured or the fetch fails)
+   plus a JSON transcript of the previous four turns and the target message, at
    temperature 0 with a JSON-schema-constrained response, and returns a
    `KtbJudgeVerdict` with `categories` (fixed enum: Suicidal ideation, Suicide
    methods or planning, Suicide rationalization, Self-harm, Substance misuse)

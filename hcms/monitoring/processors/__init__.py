@@ -7,6 +7,9 @@ from hcms.monitoring.processors.in_silico_batch_conversation import (
 )
 from hcms.monitoring.processors.in_silico_conversation import (
     InSilicoConversationProcessor,
+    TooManyFailedConversationsError,
+    check_failed_conversation_share,
+    get_max_failed_conversation_share,
 )
 from hcms.monitoring.processors.regression import RegTestProcessor
 
@@ -16,4 +19,7 @@ __all__ = [
     "RegTestProcessor",
     "InSilicoConversationProcessor",
     "InSilicoConversationBatchProcessor",
+    "TooManyFailedConversationsError",
+    "check_failed_conversation_share",
+    "get_max_failed_conversation_share",
 ]

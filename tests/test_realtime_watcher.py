@@ -1307,6 +1307,51 @@ def test_retry_waits_for_its_backoff_delay():
     assert watcher._retry_attempts[retry_key] == 1  # not due yet, so not retried
 
 
+def test_content_change_discards_retry_for_old_text():
+    repository = ContentGuardStubRepository()
+    rated: list[str] = []
+
+    def rater(text: str) -> list[int]:
+        rated.append(text)
+        if len(rated) == 1:
+            raise RuntimeError("provider unavailable")
+        return [0]
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=rater,
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+        backfill_retry_sleep_seconds=0.0,
+    )
+    document_id = ObjectId()
+    repository.current_content[(document_id, 0)] = "old"
+    watcher.handle_change_event(
+        {
+            "operationType": "insert",
+            "fullDocument": _conversation_document(
+                document_id, "c-refresh", [_message("old", [])]
+            ),
+        }
+    )
+    assert len(watcher._retry_queue) == 1
+
+    repository.current_content[(document_id, 0)] = "new"
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {"updatedFields": {"messages.0.content": "new"}},
+            "fullDocument": _conversation_document(
+                document_id, "c-refresh", [_message("new", [])]
+            ),
+        }
+    )
+    watcher._run_due_retries()
+
+    assert rated == ["old", "new"]
+    assert [call.expected_content for call in repository.calls] == ["new"]
+    assert watcher._retry_queue == {}
+
+
 def test_content_change_event_rates_an_already_flagged_message_again():
     repository = StubRepository()
     watcher = RealtimeConversationWatcher(
@@ -1588,6 +1633,117 @@ def test_content_change_during_in_flight_rating_rates_the_new_text():
     assert not watcher._in_flight
     assert not watcher._pending_targets
     assert not watcher._retry_requested
+
+
+def test_stale_retry_cannot_replace_new_pending_content():
+    repository = ContentGuardStubRepository()
+    started = threading.Event()
+    release = threading.Event()
+    rated: list[str] = []
+
+    def rater(text: str) -> list[int]:
+        rated.append(text)
+        if len(rated) == 1:
+            started.set()
+            assert release.wait(timeout=5)
+        if len(rated) == 2:
+            raise RuntimeError("new-content request failed")
+        return [0]
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=rater,
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+        worker_threads=2,
+        backfill_retry_sleep_seconds=0.0,
+    )
+    document_id = ObjectId()
+    repository.current_content[(document_id, 0)] = "old"
+    watcher.handle_change_event(
+        {
+            "operationType": "insert",
+            "fullDocument": _conversation_document(
+                document_id, "c-pending", [_message("old", [])]
+            ),
+        }
+    )
+    assert started.wait(timeout=5)
+
+    repository.current_content[(document_id, 0)] = "new"
+    watcher.handle_change_event(
+        {
+            "operationType": "update",
+            "updateDescription": {"updatedFields": {"messages.0.content": "new"}},
+            "fullDocument": _conversation_document(
+                document_id, "c-pending", [_message("new", [])]
+            ),
+        }
+    )
+    old_target = MessageBackfillTarget(
+        document_id=document_id,
+        message_index=0,
+        content="old",
+        missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+    )
+    watcher._dispatch_target(old_target, is_retry=True)
+    assert watcher._pending_targets[(document_id, 0)].content == "new"
+
+    release.set()
+    assert watcher.wait_for_pending(timeout=5)
+    watcher._run_due_retries()
+    assert watcher.wait_for_pending(timeout=5)
+    watcher.shutdown()
+
+    assert rated == ["old", "new", "new"]
+    assert repository.skipped == ["old"]
+    assert [call.expected_content for call in repository.calls] == ["new"]
+    assert watcher._retry_queue == {}
+
+
+def test_backfill_skips_a_live_rating_in_flight():
+    document_id = ObjectId()
+    target = MessageBackfillTarget(
+        document_id=document_id,
+        message_index=0,
+        content="hello",
+        missing_reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+    )
+    repository = FilteringStubRepository(targets=[target])
+    started = threading.Event()
+    release = threading.Event()
+    rated: list[str] = []
+
+    def rater(text: str) -> list[int]:
+        rated.append(text)
+        started.set()
+        assert release.wait(timeout=5)
+        return [0]
+
+    watcher = RealtimeConversationWatcher(
+        repository=repository,
+        openai_rater=rater,
+        reviewer_ids={SYSTEM_OPENAI_REVIEWER_ID},
+        worker_threads=4,
+    )
+    watcher.handle_change_event(
+        {
+            "operationType": "insert",
+            "fullDocument": _conversation_document(
+                document_id, "c-backfill", [_message("hello", [])]
+            ),
+        }
+    )
+    assert started.wait(timeout=5)
+
+    assert watcher._backfill_step() == "retry_pending"
+    assert rated == ["hello"]
+    assert repository.calls == []
+    assert not watcher._backfill.complete
+
+    release.set()
+    assert watcher.wait_for_pending(timeout=5)
+    watcher.shutdown()
+    assert len(repository.calls) == 1
 
 
 @dataclass

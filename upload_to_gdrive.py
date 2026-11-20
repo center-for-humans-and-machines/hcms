@@ -6,13 +6,46 @@ import os
 import sys
 from datetime import datetime
 
+import backoff
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 # Path to your service account key file
 SERVICE_ACCOUNT_FILE = "credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+# Attempts per file upload, first try included, with exponential backoff and
+# jitter in between while Drive rate-limits or answers with a server error.
+UPLOAD_MAX_TRIES = 6
+
+
+def _is_rate_limited(error: HttpError) -> bool:
+    """Tell whether a Drive 403 reports a rate limit rather than a permission issue."""
+    reasons = [str(error.reason or "")]
+    reasons += [
+        str(detail.get("reason", ""))
+        for detail in error.error_details
+        if isinstance(detail, dict)
+    ]
+    return any("ratelimit" in reason.replace(" ", "").lower() for reason in reasons)
+
+
+def is_retryable_upload_error(error: HttpError) -> bool:
+    """Tell whether a Drive upload error is transient and worth retrying.
+
+    Args:
+        error: The error the Drive API answered with.
+
+    Returns:
+        bool: True for rate limits (403 with a rate-limit reason, or 429) and
+        server errors (5xx), False for every other error.
+    """
+    status = error.resp.status
+    if status == 429 or status >= 500:
+        return True
+    return status == 403 and _is_rate_limited(error)
 
 
 def authenticate_drive_service_account():
@@ -126,12 +159,26 @@ def upload_file(service, file_path, folder_id, drive_id=None):
         )
 
     try:
-        file = service.files().create(**create_params).execute()
+        file = _create_file_with_retries(service, create_params)
         print(f"Successfully uploaded '{file_name}' with ID: {file.get('id')}")
         return file.get("id")
     except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"Failed to upload '{file_name}': {str(e)}")
         return None
+
+
+@backoff.on_exception(
+    backoff.expo,
+    HttpError,
+    max_tries=UPLOAD_MAX_TRIES,
+    giveup=lambda error: not is_retryable_upload_error(error),
+    on_backoff=lambda details: print(
+        f"Backing off {details['wait']:.1f}s after {details['tries']} tries for Drive upload"
+    ),
+)
+def _create_file_with_retries(service, create_params):
+    """Create a Drive file, retrying rate limits and server errors with backoff."""
+    return service.files().create(**create_params).execute()
 
 
 def parse_arguments():
