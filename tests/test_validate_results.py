@@ -295,6 +295,57 @@ def test_null_filter_entry_names_the_filter(tmp_path, monkeypatch):
     assert "Missing hate filter result in task task-3" in message
 
 
+def _second_choice(result: Dict[str, Any], **fields: Any) -> None:
+    choices = result["response"]["body"]["choices"]
+    choices.append({**choices[0], "index": 1, **fields})
+
+
+def _second_prompt(result: Dict[str, Any], filters: Any) -> None:
+    result["response"]["body"]["prompt_filter_results"].append(
+        {"prompt_index": 1, "content_filter_results": filters}
+    )
+
+
+def test_every_choice_and_prompt_entry_is_checked(tmp_path, monkeypatch):
+    """Azure returns a block per choice (``n > 1``) and per prompt index."""
+    processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=5)
+    clean = _good_output("task-0")
+    _second_choice(clean)
+    _second_prompt(clean, SAFE_PROMPT_FILTERS)
+    filtered_choice = _good_output("task-1")
+    _second_choice(filtered_choice, content_filter_results=SELF_HARM_FILTERS)
+    null_choice = _good_output("task-2")
+    _second_choice(null_choice, content_filter_results=None)
+    jailbreak = {**SAFE_PROMPT_FILTERS, "jailbreak": {"detected": True}}
+    flagged_prompt = _good_output("task-3")
+    _second_prompt(flagged_prompt, jailbreak)
+    null_prompt = _good_output("task-4")
+    _second_prompt(null_prompt, None)
+
+    message = _validation_message(
+        processor, [clean, filtered_choice, null_choice, flagged_prompt, null_prompt]
+    )
+
+    assert "task task-0" not in message
+    assert "self_harm filter triggered in task task-1" in message
+    assert "Missing completion 1 content filter results in task task-2" in message
+    assert "Jailbreak attempt detected in task task-3" in message
+    assert "Missing prompt 1 content filter results in task task-4" in message
+    assert "Number of successful tasks: 1" in message
+    assert "Number of failed tasks: 4" in message
+
+
+@pytest.mark.parametrize("endpoint", [AZURE_ENDPOINT, OPENAI_ENDPOINT])
+def test_finish_reason_of_every_choice_is_checked(tmp_path, monkeypatch, endpoint: str):
+    processor = _processor(tmp_path, monkeypatch, endpoint, num_rows=1)
+    result = _good_output("task-0")
+    _second_choice(result, finish_reason="length")
+
+    message = _validation_message(processor, [result])
+
+    assert "Unexpected finish reason in task task-0: length" in message
+
+
 def test_rejected_prompt_reports_status_message_and_filter(tmp_path, monkeypatch):
     processor = _processor(tmp_path, monkeypatch, AZURE_ENDPOINT, num_rows=1)
 

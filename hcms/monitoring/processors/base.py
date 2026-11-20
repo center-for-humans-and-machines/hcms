@@ -262,9 +262,12 @@ class BaseProcessor(ABC):
         if not result.choices:
             return [f"Malformed result in task {task}: no choices in the response body"]
 
-        finish_reason = result.choices[0].get("finish_reason", "stop")
-        if finish_reason != "stop":
-            errors.append(f"Unexpected finish reason in task {task}: {finish_reason}")
+        for choice in result.choices:
+            finish_reason = choice.get("finish_reason", "stop")
+            if finish_reason != "stop":
+                errors.append(
+                    f"Unexpected finish reason in task {task}: {finish_reason}"
+                )
         return errors
 
     def _validate_azure_specific(self, result: BatchResult) -> List[str]:
@@ -287,14 +290,14 @@ class BaseProcessor(ABC):
         if result.request_failed:
             return []
 
-        # Handle successful case. Azure returns some responses with a null
-        # block on the choice or the prompt. An absent block is read as a
-        # null one, and so is the block of an absent prompt entry.
-        blocks = [
-            ("completion", choice.get("content_filter_results"))
-            for choice in result.choices[:1]
-        ]
-        blocks.append(("prompt", next(iter(result.prompt_filter_blocks), None)))
+        # Handle successful case. Azure returns one block per choice and one
+        # per prompt entry, and leaves some of them null. An absent block is
+        # read as a null one, and so is the block of an absent prompt entry.
+        blocks = self._label_blocks(
+            "completion",
+            [choice.get("content_filter_results") for choice in result.choices],
+        )
+        blocks += self._label_blocks("prompt", result.prompt_filter_blocks or [None])
 
         # Check Azure content filters, each block on its own: a null
         # completion block must not hide the verdict on the prompt.
@@ -302,6 +305,22 @@ class BaseProcessor(ABC):
         for source, filters in blocks:
             errors.extend(self._validate_filter_block(filters, task, source))
         return errors
+
+    @staticmethod
+    def _label_blocks(source: str, blocks: List[Any]) -> List[tuple[str, Any]]:
+        """Name each content filter block for the messages.
+
+        Args:
+            source: Which blocks they are: "completion" or "prompt"
+            blocks: Content filter blocks as returned by Azure
+
+        Returns:
+            List[tuple[str, Any]]: Each block with its name; the name carries
+                the block's index when there is more than one
+        """
+        if len(blocks) == 1:
+            return [(source, blocks[0])]
+        return [(f"{source} {index}", block) for index, block in enumerate(blocks)]
 
     def _validate_filter_block(self, filters: Any, task: str, source: str) -> List[str]:
         """Validate one content filter block, which Azure can leave null.
@@ -312,7 +331,8 @@ class BaseProcessor(ABC):
         Args:
             filters: Content filter block as returned by Azure, in any shape
             task: Task identifier
-            source: Which block it is: "completion", "prompt" or "error"
+            source: Name of the block: "completion", "prompt" or "error",
+                with its index when there are several
 
         Returns:
             List[str]: Validation error messages, empty if the block is valid
