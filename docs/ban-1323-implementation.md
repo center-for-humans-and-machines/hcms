@@ -34,7 +34,8 @@ tests against the tower's judge and a real MongoDB before the dev rollout.
   to die", watcher), benchmarks with the deployed binary, schema and prompt
   beside Llama Guard.
 - hcms-dashboard: `system_llm_judge` label and display-name fix; reviewer
-  assignment only after the holdout precision gate.
+  assignment on judge flags (BAN-1519, without waiting for the holdout
+  precision gate).
 - elderbot-android-app backend: replace the whole-array `messages` write in
   `save_message` with a content-guarded targeted update that rereads on
   mismatch, so flags survive and concurrent same-role saves both land.

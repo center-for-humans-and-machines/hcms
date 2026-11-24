@@ -4,7 +4,8 @@
 
 ## Status
 
-Accepted (BAN-1323)
+Accepted (BAN-1323). Amended by BAN-1519: the dashboard assigns reviewers on
+judge flags without waiting for the holdout precision gate.
 
 ## Context
 
@@ -112,5 +113,8 @@ Three constraints shaped the watcher side:
   merges consecutive same-role messages, a merge can still drop a flag written
   in between; with a targeted content write, the content-change path above
   keeps ratings and merges consistent.
-- Reviewer assignment on judge flags is enabled in the dashboard only once the
-  judge's precision has been measured on a clinician-labelled holdout.
+- The dashboard assigns every reviewer to a message the judge flags, like
+  OpenAI moderation and Llama Guard flags (BAN-1519). This was first to wait
+  until the judge's precision had been measured on a clinician-labelled
+  holdout; BAN-1519 chose to review judge flags now instead. The holdout still
+  measures the judge's precision.
