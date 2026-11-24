@@ -144,13 +144,20 @@ jobs:
           MODEL_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           MODEL_ENDPOINT: ${{ vars.AZURE_OPENAI_ENDPOINT }}
           CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.DEFAULT_CHAT_COMPLETIONS_MODEL_NAME }}
+          # Kill The Bot (KTB) judge on the Elderbot RCT tower's llama-server.
           LLM_AS_JUDGE_ENABLED: ${{ vars.LLM_AS_JUDGE_ENABLED }}
+          LLM_JUDGE_ENDPOINT: ${{ vars.LLM_JUDGE_ENDPOINT }}
+          LLM_JUDGE_MODEL: ${{ vars.LLM_JUDGE_MODEL }}
+          LLM_JUDGE_API_KEY: ${{ secrets.LLM_JUDGE_API_KEY }}
+          LLM_JUDGE_MAX_FAILED_SHARE: ${{ vars.LLM_JUDGE_MAX_FAILED_SHARE }}
         timeout-minutes: 1440
         run: |
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
       - name: Archive data evaluation results to GitHub
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # Also when the KTB judge step fails, so its failed rows can be inspected.
+        if: ${{ !cancelled() }}
         with:
           name: reg-test-eval-round-${{ matrix.round_number }}-${{ github.run_id }}
           path: |
