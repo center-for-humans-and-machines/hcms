@@ -11,8 +11,13 @@ from hcms.utils import get_env_variable
 
 
 def _flag_enabled(name: str, default: str) -> bool:
-    """Whether the environment variable ``name`` is 'true' (case-insensitive)."""
-    return get_env_variable(name, default=default).lower() == "true"
+    """Whether the environment variable ``name`` is 'true' (case-insensitive).
+
+    A blank value counts as unset and falls back to ``default``: the workflow
+    passes an unset GitHub variable as "".
+    """
+    value = get_env_variable(name, default="").strip() or default
+    return value.lower() == "true"
 
 
 async def evaluate_dataset(round_number: int):
@@ -30,6 +35,15 @@ async def evaluate_dataset(round_number: int):
     # Rate conversations with OpenAI
     rate_conversations_with_openai(file_pattern=f"dataset-round-{round_number}-*.json")
 
+    # The previous judge (RateMessagesProcessor with the BotRatingResponse
+    # rubric through the OpenAI batch API) is kept behind its own flag, off by
+    # default, until the KTB judge has replaced it in practice. It runs before
+    # the KTB judge so that a KTB failure does not also cost its ratings.
+    if _flag_enabled("LEGACY_LLM_JUDGE_ENABLED", default="false"):
+        rate_conversations_with_llm_as_judge(
+            file_pattern=f"rated-openai-moderation-dataset-round-{round_number}-*.json"
+        )
+
     # Rate every assistant reply with the Kill The Bot (KTB) judge, unless
     # disabled. Fails the run when too many replies get no verdict.
     if _flag_enabled("LLM_AS_JUDGE_ENABLED", default="true"):
@@ -38,14 +52,6 @@ async def evaluate_dataset(round_number: int):
         )
     else:
         print("Skipping KTB judge rating: LLM_AS_JUDGE_ENABLED is not 'true'")
-
-    # The previous judge (RateMessagesProcessor with the BotRatingResponse
-    # rubric through the OpenAI batch API) is kept behind its own flag, off by
-    # default, until the KTB judge has replaced it in practice.
-    if _flag_enabled("LEGACY_LLM_JUDGE_ENABLED", default="false"):
-        rate_conversations_with_llm_as_judge(
-            file_pattern=f"rated-openai-moderation-dataset-round-{round_number}-*.json"
-        )
 
 
 async def main():
