@@ -17,6 +17,7 @@ import openai
 import polars as pl
 import pytest
 
+from hcms.rating import ktb_judge_dataset
 from hcms.rating.ktb_judge import KtbJudgeVerdict
 from hcms.rating.ktb_judge_dataset import (
     KtbJudgeFailuresError,
@@ -27,6 +28,25 @@ SAFE = KtbJudgeVerdict(categories=[], rationale="Supportive reply.")
 UNSAFE = KtbJudgeVerdict(
     categories=["Suicide methods or planning"], rationale="Gives a method."
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_dotenv_and_delays(monkeypatch):
+    """Only see the variables a test sets, and do not wait between attempts.
+
+    get_env_variable reloads .env with override=True on every read, so on a
+    bootstrapped checkout (.env copied from env.example) its values would
+    replace what monkeypatch.setenv set.
+    """
+    monkeypatch.setattr("hcms.utils.env.load_dotenv", lambda *_a, **_k: False)
+    for name in (
+        "LLM_JUDGE_MAX_ATTEMPTS",
+        "LLM_JUDGE_MAX_FAILED_SHARE",
+        "LLM_AS_JUDGE_ENABLED",
+        "LEGACY_LLM_JUDGE_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(ktb_judge_dataset, "RETRY_DELAY_SECONDS", 0)
 
 
 def _conversation(*turns: tuple[str, str]) -> list[dict[str, str]]:
@@ -153,7 +173,8 @@ def test_writes_verdicts_to_rated_ktb_judge_file(dataset_dir):
 def test_failed_rating_is_never_written_as_safe(dataset_dir, error):
     judge = _FakeJudge({"a1": [error, error]})
 
-    with pytest.raises(KtbJudgeFailuresError, match="1 of 5 replies"):
+    # One failure already exceeds 10% of the 5 replies, so the run stops there.
+    with pytest.raises(KtbJudgeFailuresError, match="Stopped after 1 of 1 replies"):
         rate_conversations_with_ktb_judge(
             input_dir=dataset_dir,
             output_dir=dataset_dir,
@@ -240,6 +261,60 @@ def test_blank_environment_values_use_defaults(dataset_dir, monkeypatch):
     assert summary.failed == 0
 
 
+def test_stops_once_the_failed_share_can_no_longer_be_met(dataset_dir):
+    error = ValueError("boom")
+    judge = _FakeJudge({"a1": [error], "a2": [error]})
+
+    with pytest.raises(KtbJudgeFailuresError, match="Stopped after 2 of 2"):
+        rate_conversations_with_ktb_judge(
+            input_dir=dataset_dir,
+            output_dir=dataset_dir,
+            rater=judge,
+            max_attempts=1,
+            max_failed_share=0.2,
+        )
+
+    # 2 of 5 is over 20%, so a3, a5 and "opening" are never sent.
+    assert [c["content"] for c in judge.calls] == ["a1", "a2"]
+    rows = _rows(dataset_dir / "rated-ktb-judge-dataset-round-2-gpt-4o.json")
+    assert [row["message"] for row in rows] == ["a1", "a2"]
+
+
+def test_stops_after_consecutive_failures(tmp_path, monkeypatch):
+    monkeypatch.setattr(ktb_judge_dataset, "MAX_CONSECUTIVE_FAILURES", 3)
+    replies = [f"r{i}" for i in range(10)]
+    _write_dataset(
+        tmp_path,
+        "dataset-round-2-many.json",
+        {"c1": _conversation(*[("assistant", reply) for reply in replies])},
+    )
+    judge = _FakeJudge({"r0": [SAFE]}, default=ValueError("timed out"))
+
+    with pytest.raises(KtbJudgeFailuresError, match="3 of them in a row"):
+        rate_conversations_with_ktb_judge(
+            input_dir=tmp_path,
+            output_dir=tmp_path,
+            rater=judge,
+            max_attempts=1,
+            max_failed_share=1,
+        )
+
+    assert len(judge.calls) == 4
+
+
+def test_waits_between_attempts(dataset_dir, monkeypatch):
+    monkeypatch.setattr(ktb_judge_dataset, "RETRY_DELAY_SECONDS", 7)
+    sleeps: list[float] = []
+    monkeypatch.setattr(ktb_judge_dataset.time, "sleep", sleeps.append)
+    judge = _FakeJudge({"a1": [ValueError("boom"), SAFE]})
+
+    rate_conversations_with_ktb_judge(
+        input_dir=dataset_dir, output_dir=dataset_dir, rater=judge, max_attempts=2
+    )
+
+    assert sleeps == [7]
+
+
 def test_no_matching_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         rate_conversations_with_ktb_judge(
@@ -290,12 +365,14 @@ def fixture_raters(monkeypatch):
         ("true", "false", ["rate_conversations_with_ktb_judge"]),
         ("false", "false", []),
         ("false", "true", ["rate_conversations_with_llm_as_judge"]),
+        # Blank (an unset GitHub variable) means the default: KTB on, legacy off.
+        ("", " ", ["rate_conversations_with_ktb_judge"]),
         (
             "TRUE",
             "True",
             [
-                "rate_conversations_with_ktb_judge",
                 "rate_conversations_with_llm_as_judge",
+                "rate_conversations_with_ktb_judge",
             ],
         ),
     ],
@@ -312,3 +389,45 @@ def test_evaluate_dataset_judge_flags(monkeypatch, raters, ktb, legacy, expected
         "rate_conversations_with_openai",
     ]
     assert called[2:] == expected
+
+
+def test_ktb_failure_does_not_stop_the_legacy_judge(monkeypatch, raters):
+    monkeypatch.setenv("LLM_AS_JUDGE_ENABLED", "true")
+    monkeypatch.setenv("LEGACY_LLM_JUDGE_ENABLED", "true")
+    evaluate_dataset, called = raters
+
+    def failing_ktb(*_args, **_kwargs):
+        raise KtbJudgeFailuresError("judge down")
+
+    monkeypatch.setattr(
+        evaluate_dataset, "rate_conversations_with_ktb_judge", failing_ktb
+    )
+
+    with pytest.raises(KtbJudgeFailuresError):
+        asyncio.run(evaluate_dataset.evaluate_dataset(2))
+
+    assert "rate_conversations_with_llm_as_judge" in called
+
+
+def test_trend_report_reads_ktb_judge_files(dataset_dir):
+    reg_test_ktb_judge = importlib.import_module("hcms.evaluation.reg_test_ktb_judge")
+    judge = _FakeJudge({"a2": [UNSAFE], "a3": [ValueError("boom")]})
+    rate_conversations_with_ktb_judge(
+        input_dir=dataset_dir,
+        output_dir=dataset_dir,
+        rater=judge,
+        max_attempts=1,
+        max_failed_share=0.5,
+    )
+
+    stats = reg_test_ktb_judge.process_ktb_judge_scores(
+        dataset_dir / "rated-ktb-judge-dataset-round-2-gpt-4o.json"
+    )["ktb_judge"]
+
+    assert stats["total_replies"] == 5
+    assert stats["rated_replies"] == 4
+    assert stats["failed_replies"] == 1
+    assert stats["unsafe_replies"] == 1
+    assert stats["unsafe_share"] == pytest.approx(0.25)
+    assert stats["categories_count"] == {"Suicide methods or planning": 1}
+    assert stats["per_turn_analysis"] == {4: 1}
