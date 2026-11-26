@@ -2,18 +2,32 @@ name: Regression testing
 
 on: # yamllint disable-line rule:truthy
   workflow_dispatch: # Enables manual trigger
+  schedule:
+    # Daily at 06:00 UTC (07:00 CET / 08:00 CEST, the tower's local time).
+    # The jobs run on the Elderbot RCT tower's self-hosted runners, so the run
+    # must stay clear of the tower's nightly maintenance: the reboot at 03:30
+    # and the Docker/runner cache cleanup at 04:30 local time. Starting at
+    # 06:00 UTC leaves about 20 hours for the Azure batch jobs before the next
+    # maintenance window (19.5 hours in summer time). The job timeouts below
+    # (6 h gen-data + 12 h eval-data) end the run by 00:00 UTC at the latest.
+    - cron: "0 6 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A scheduled run is never cancelled by the next day's run (it waits
+  # instead); a manual run still replaces an older one on the same ref.
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 permissions: {}
 
+# Provider: Azure OpenAI for gpt-* models (BAN-1382). hcms picks the client
+# from MODEL_ENDPOINT: a URL containing "azure" selects Azure OpenAI, which
+# also needs MODEL_API_VERSION. Models whose name does not start with "gpt-"
+# are routed to Gemini instead, so switching to Gemini only means changing
+# the chat_model matrix and the Gemini variables.
 env:
-  BATCH_PROVIDER: openai
   BATCH_MODEL_NAME: ${{ vars.BATCH_MODEL_NAME }}
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  OPENAI_ENDPOINT: ${{ vars.OPENAI_ENDPOINT }}
+  MODEL_API_VERSION: ${{ vars.MODEL_API_VERSION }}
   GEMINI_ENDPOINT: ${{ vars.GEMINI_ENDPOINT }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   LANGFUSE_HOST: ${{ vars.LANGFUSE_HOST }}
@@ -21,21 +35,26 @@ env:
   LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
   LLAMA_GUARD_API_KEY: ${{ secrets.LLAMA_GUARD_API_KEY }}
   LLAMA_GUARD_ENDPOINT: ${{ vars.LLAMA_GUARD_ENDPOINT }}
+  # The moderation endpoint has no Azure equivalent, so it stays on OpenAI.
   OPENAI_MODERATION_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   SKIP_CACHE: true
 
 jobs:
   gen-data:
     runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
+    timeout-minutes: 360
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        round_number: [2, 3]
+        # Round 2 only (Park et al. conversation starters). Round 3 is left out
+        # of the run but its code is kept; add 3 back here and in eval-data.
+        round_number: [2]
+        # On Azure the model name is the deployment name. Only the model the
+        # Elderbot backend runs is tested (BAN-1410).
         chat_model:
-          - gpt-4o-2024-08-06
-          - gpt-5.3-chat-latest
+          - gpt-5.5-2026-04-23
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,8 +71,8 @@ jobs:
 
       - name: Generate dataset
         env:
-          MODEL_API_KEY: ${{ startsWith(matrix.chat_model, 'gpt-') && secrets.OPENAI_API_KEY || secrets.GEMINI_API_KEY }}
-          MODEL_ENDPOINT: ${{ startsWith(matrix.chat_model, 'gpt-') && vars.OPENAI_ENDPOINT || vars.GEMINI_ENDPOINT }}
+          MODEL_API_KEY: ${{ startsWith(matrix.chat_model, 'gpt-') && secrets.AZURE_OPENAI_API_KEY || secrets.GEMINI_API_KEY }}
+          MODEL_ENDPOINT: ${{ startsWith(matrix.chat_model, 'gpt-') && vars.AZURE_OPENAI_ENDPOINT || vars.GEMINI_ENDPOINT }}
           CHAT_COMPLETIONS_MODEL_NAME: ${{ matrix.chat_model }}
         run: |
           poetry run python generate_dataset.py --round-number=${{ matrix.round_number }} --tag=regression-pipeline
@@ -93,12 +112,13 @@ jobs:
 
   eval-data:
     runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
+    timeout-minutes: 720
     permissions:
       contents: read
     needs: gen-data
     strategy:
       matrix:
-        round_number: [2, 3]
+        round_number: [2]
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -126,16 +146,23 @@ jobs:
 
       - name: Run regression tests
         env:
-          MODEL_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MODEL_ENDPOINT: ${{ vars.OPENAI_ENDPOINT }}
+          MODEL_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          MODEL_ENDPOINT: ${{ vars.AZURE_OPENAI_ENDPOINT }}
           CHAT_COMPLETIONS_MODEL_NAME: ${{ vars.DEFAULT_CHAT_COMPLETIONS_MODEL_NAME }}
+          # Kill The Bot (KTB) judge on the Elderbot RCT tower's llama-server.
           LLM_AS_JUDGE_ENABLED: ${{ vars.LLM_AS_JUDGE_ENABLED }}
-        timeout-minutes: 1440
+          LLM_JUDGE_ENDPOINT: ${{ vars.LLM_JUDGE_ENDPOINT }}
+          LLM_JUDGE_MODEL: ${{ vars.LLM_JUDGE_MODEL }}
+          LLM_JUDGE_API_KEY: ${{ secrets.LLM_JUDGE_API_KEY }}
+          LLM_JUDGE_MAX_FAILED_SHARE: ${{ vars.LLM_JUDGE_MAX_FAILED_SHARE }}
+        timeout-minutes: 690
         run: |
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
       - name: Archive data evaluation results to GitHub
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # Also when the KTB judge step fails, so its failed rows can be inspected.
+        if: ${{ !cancelled() }}
         with:
           name: reg-test-eval-round-${{ matrix.round_number }}-${{ github.run_id }}
           path: |
@@ -144,10 +171,13 @@ jobs:
 
       - name: Setup Google Drive credentials
         uses: ./.github/actions/setup-gdrive # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
+        # Also when the KTB judge step fails, so the day's ratings reach Drive.
+        if: ${{ !cancelled() }}
         with:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
       - name: Upload evaluation results to Google Drive
+        if: ${{ !cancelled() }}
         env:
           GOOGLE_DRIVE_SHARED_DRIVE_ID: ${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
         run: |

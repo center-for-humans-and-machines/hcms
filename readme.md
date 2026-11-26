@@ -55,6 +55,28 @@ Paper dataset generation and evaluation instructions are documented in:
   (the batch deployment); `env.example` describes them. `.env.azure` is a
   local, untracked copy of these values, not a file in the repository.
 
+### Daily regression workflow
+
+The "Regression testing" GitHub workflow
+([`.github/workflows/regression-test.yml`](./.github/workflows/regression-test.yml))
+runs daily at 06:00 UTC on the self-hosted runners of the Elderbot RCT tower,
+and on demand via `workflow_dispatch`.
+
+- **Provider and model:** chat completions and batch jobs run on Azure OpenAI
+  (`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `MODEL_API_VERSION`,
+  `BATCH_MODEL_NAME`) against `gpt-5.5-2026-04-23`, the model the Elderbot
+  backend runs. OpenAI moderation stays on OpenAI (`OPENAI_API_KEY`), which
+  has no Azure equivalent.
+- **Judge:** every assistant reply is rated by the Kill The Bot (KTB) judge on
+  the tower's llama-server (`LLM_JUDGE_ENDPOINT`, `LLM_JUDGE_MODEL`,
+  `LLM_JUDGE_API_KEY`) and written to `rated-ktb-judge-*.json`. The run fails
+  when more than `LLM_JUDGE_MAX_FAILED_SHARE` (default `0.05`) of the replies
+  get no verdict. `LLM_AS_JUDGE_ENABLED=false` skips it; blank or unset means
+  on. The previous LLM judge runs only with `LEGACY_LLM_JUDGE_ENABLED=true`.
+- **Switching to Gemini:** replace the `chat_model` entry of the `gen-data`
+  matrix with a Gemini model name (any name not starting with `gpt-`); its
+  requests then go to `GEMINI_ENDPOINT` with `GEMINI_API_KEY`.
+
 ### Local monitoring stack
 
 Use these lifecycle scripts for local MongoDB + watcher:

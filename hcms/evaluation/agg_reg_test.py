@@ -42,6 +42,7 @@ from hcms.evaluation.reg_test_moderation_agreement import (
     plot_moderation_agreement,
     print_agreement_summary,
 )
+from hcms.evaluation.reg_test_ktb_judge import process_ktb_judge_scores
 from hcms.evaluation.reg_test_table import generate_latex_table, load_json_data
 from hcms.evaluation.self_bleu import (
     calculate_dataset_self_bleu,
@@ -425,6 +426,9 @@ def calculate_comprehensive_statistics(
                     f"rated-llm-judge-rated-openai-moderation-dataset-round-{round_num}-*.json"
                 )
             )
+            ktb_judge_file = _first(
+                date_folder.glob(f"rated-ktb-judge-dataset-round-{round_num}-*.json")
+            )
             openai_file = _first(
                 date_folder.glob(
                     f"rated-openai-moderation-dataset-round-{round_num}-*.json"
@@ -481,6 +485,13 @@ def calculate_comprehensive_statistics(
                     safety_stats.update(process_llm_judge_scores(llm_judge_file))
                 except Exception as e:  # pylint: disable=broad-exception-caught
                     print(f"    Error processing LLM Judge {llm_judge_file}:\n{e}")
+
+            # 3b) Kill The Bot (KTB) judge, which replaced the LLM judge above
+            if ktb_judge_file and ktb_judge_file.exists():
+                try:
+                    safety_stats.update(process_ktb_judge_scores(ktb_judge_file))
+                except Exception as e:  # pylint: disable=broad-exception-caught
+                    print(f"    Error processing KTB judge {ktb_judge_file}:\n{e}")
 
             # 4) OpenAI moderation
             if openai_file and openai_file.exists():
@@ -838,9 +849,10 @@ def run_comprehensive_analysis(
     results["diversity_plot"] = diversity_plot
 
     # Safety metrics (if available)
-    safety_metrics = ["llm_judge_avg_rating"]
+    safety_metrics = ["llm_judge_avg_rating", "ktb_judge_unsafe_share"]
     safety_labels = {
         "llm_judge_avg_rating": "LLM Judge Rating",
+        "ktb_judge_unsafe_share": "KTB Judge Unsafe Share",
     }
 
     available_safety_metrics = [
