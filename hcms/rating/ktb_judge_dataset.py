@@ -8,8 +8,15 @@ As in the realtime watcher, a failed rating is never written as a safe verdict.
 Transport errors, truncated completions and invalid verdicts are recorded as
 failures (``ktb_unsafe`` is null and ``ktb_error`` says why), counted, and the
 run fails when their share exceeds ``LLM_JUDGE_MAX_FAILED_SHARE``.
+
+The run stops early, without waiting for every reply, once the failures
+already exceed that share of all replies to rate, or after
+``MAX_CONSECUTIVE_FAILURES`` failed replies in a row: a judge server that
+hangs instead of refusing connections would otherwise hold the run for up to
+``LLM_JUDGE_MAX_ATTEMPTS`` timeouts per reply.
 """
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -34,6 +41,12 @@ DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_FAILED_SHARE = 0.05
 """Share of replies (0 to 1) that may fail to get a verdict before the run fails."""
 
+MAX_CONSECUTIVE_FAILURES = 10
+"""Failed replies in a row after which the judge is taken to be down."""
+
+RETRY_DELAY_SECONDS = 5.0
+"""Pause between attempts at one reply, so a transient error can clear."""
+
 OUTPUT_SCHEMA = {
     "conversation_id": pl.String,
     "turn": pl.Int64,
@@ -57,6 +70,8 @@ class KtbJudgeRunSummary:
     rated: int = 0
     unsafe: int = 0
     failed: int = 0
+    consecutive_failed: int = 0
+    stopped_early: bool = False
 
     @property
     def total(self) -> int:
@@ -88,7 +103,9 @@ def _rate_reply(
 ) -> dict[str, Any]:
     """Rate one reply; return the verdict fields, or the last error if all attempts fail."""
     error: Optional[Exception] = None
-    for _ in range(max_attempts):
+    for attempt in range(max_attempts):
+        if attempt:
+            time.sleep(RETRY_DELAY_SECONDS)
         try:
             verdict = rater(content, role=ASSISTANT, context_messages=context)
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -111,39 +128,58 @@ def _rate_reply(
     }
 
 
-def _rate_file(
-    path: Path,
-    rater: KtbJudgeRater,
-    max_attempts: int,
-    summary: KtbJudgeRunSummary,
-) -> pl.DataFrame:
-    """Rate every nonblank assistant reply in one generated dataset file."""
-    df = _load_json_with_config(path)
-    rows = []
+def _replies(df: pl.DataFrame):
+    """Yield (conversation id, conversation, index) of each nonblank assistant reply."""
     for conversation_id, conversation in zip(
         df["conversation_id"].to_list(), df["conversation"].to_list()
     ):
         for index, message in enumerate(conversation or []):
             content = message.get("content") or ""
-            if message.get("role") != ASSISTANT or not content.strip():
-                continue
-            result = _rate_reply(
-                rater, content, _context_for(conversation, index), max_attempts
-            )
-            if result["ktb_error"] is not None:
-                summary.failed += 1
-            else:
-                summary.rated += 1
-                summary.unsafe += bool(result["ktb_unsafe"])
-            rows.append(
-                {
-                    "conversation_id": str(conversation_id),
-                    "turn": index,
-                    "role": ASSISTANT,
-                    "message": content,
-                    **result,
-                }
-            )
+            if message.get("role") == ASSISTANT and content.strip():
+                yield conversation_id, conversation, index
+
+
+def _rate_file(  # pylint: disable=too-many-arguments
+    df: pl.DataFrame,
+    rater: KtbJudgeRater,
+    max_attempts: int,
+    summary: KtbJudgeRunSummary,
+    *,
+    max_failed: float,
+) -> pl.DataFrame:
+    """Rate every nonblank assistant reply in one generated dataset file.
+
+    Stops after the reply that takes the failures above ``max_failed`` or to
+    MAX_CONSECUTIVE_FAILURES in a row, and sets ``summary.stopped_early``.
+    """
+    rows = []
+    for conversation_id, conversation, index in _replies(df):
+        content = conversation[index]["content"]
+        result = _rate_reply(
+            rater, content, _context_for(conversation, index), max_attempts
+        )
+        if result["ktb_error"] is not None:
+            summary.failed += 1
+            summary.consecutive_failed += 1
+        else:
+            summary.rated += 1
+            summary.unsafe += bool(result["ktb_unsafe"])
+            summary.consecutive_failed = 0
+        rows.append(
+            {
+                "conversation_id": str(conversation_id),
+                "turn": index,
+                "role": ASSISTANT,
+                "message": content,
+                **result,
+            }
+        )
+        if (
+            summary.failed > max_failed
+            or summary.consecutive_failed >= MAX_CONSECUTIVE_FAILURES
+        ):
+            summary.stopped_early = True
+            break
     return pl.DataFrame(rows, schema=OUTPUT_SCHEMA)
 
 
@@ -161,7 +197,9 @@ def rate_conversations_with_ktb_judge(  # pylint: disable=too-many-arguments
 
     Writes one ``{output_prefix}{input name}`` file per input, with a row per
     assistant reply. Every file is written before the failure check, so the
-    failed rows can be inspected.
+    failed rows can be inspected. Once the run can no longer pass (failures
+    above ``max_failed_share`` of all replies, or MAX_CONSECUTIVE_FAILURES in
+    a row) it stops, writes the rows rated so far and raises.
 
     Args:
         file_pattern: Glob for the generated dataset files.
@@ -178,8 +216,8 @@ def rate_conversations_with_ktb_judge(  # pylint: disable=too-many-arguments
 
     Raises:
         FileNotFoundError: If no file matches ``file_pattern``.
-        KtbJudgeFailuresError: If no reply was rated, or the failed share is
-            above ``max_failed_share``.
+        KtbJudgeFailuresError: If there is no reply to rate, the failed share
+            is above ``max_failed_share``, or the run stopped early.
     """
     rater = rater or rate_text_with_ktb_judge
     # A blank variable (an unset GitHub variable is passed as "") means default.
@@ -204,22 +242,37 @@ def rate_conversations_with_ktb_judge(  # pylint: disable=too-many-arguments
             f"No files found in {input_dir} matching pattern '{file_pattern}'"
         )
 
+    datasets = [(path, _load_json_with_config(path)) for path in input_files]
+    expected = sum(sum(1 for _ in _replies(df)) for _, df in datasets)
+    if expected == 0:
+        raise KtbJudgeFailuresError(
+            f"No assistant replies to rate in files matching '{file_pattern}'"
+        )
+
     output_dir.mkdir(parents=True, exist_ok=True)
     summary = KtbJudgeRunSummary()
-    for path in tqdm(input_files, desc="Rating files with the KTB judge"):
-        rated = _rate_file(path, rater, max_attempts, summary)
+    for path, df in tqdm(datasets, desc="Rating files with the KTB judge"):
+        rated = _rate_file(
+            df, rater, max_attempts, summary, max_failed=max_failed_share * expected
+        )
         output_path = output_dir / f"{output_prefix}{path.name}"
         rated.write_json(output_path)
         print(f"Wrote {rated.height} KTB judge ratings to {output_path}")
+        if summary.stopped_early:
+            break
 
     print(
-        f"KTB judge: {summary.total} replies, {summary.unsafe} unsafe, "
-        f"{summary.failed} failed ({summary.failed_share:.1%}, "
+        f"KTB judge: {summary.total} of {expected} replies, {summary.unsafe} "
+        f"unsafe, {summary.failed} failed ({summary.failed_share:.1%}, "
         f"allowed {max_failed_share:.1%})"
     )
-    if summary.total == 0:
+    if summary.stopped_early:
         raise KtbJudgeFailuresError(
-            f"No assistant replies to rate in files matching '{file_pattern}'"
+            f"Stopped after {summary.failed} of {summary.total} replies tried "
+            f"(of {expected}) got no KTB judge verdict, "
+            f"{summary.consecutive_failed} of them in a row; the failed share "
+            f"of {max_failed_share:.1%} can no longer be met or the judge is "
+            "down. See the ktb_error column of the rated files"
         )
     if summary.failed_share > max_failed_share:
         raise KtbJudgeFailuresError(
