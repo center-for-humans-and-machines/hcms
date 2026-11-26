@@ -8,12 +8,15 @@ on: # yamllint disable-line rule:truthy
     # must stay clear of the tower's nightly maintenance: the reboot at 03:30
     # and the Docker/runner cache cleanup at 04:30 local time. Starting at
     # 06:00 UTC leaves about 20 hours for the Azure batch jobs before the next
-    # maintenance window, in both winter and summer time.
+    # maintenance window (19.5 hours in summer time). The job timeouts below
+    # (6 h gen-data + 12 h eval-data) end the run by 00:00 UTC at the latest.
     - cron: "0 6 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A scheduled run is never cancelled by the next day's run (it waits
+  # instead); a manual run still replaces an older one on the same ref.
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 permissions: {}
 
@@ -39,6 +42,7 @@ env:
 jobs:
   gen-data:
     runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
+    timeout-minutes: 360
     permissions:
       contents: read
     strategy:
@@ -47,10 +51,10 @@ jobs:
         # Round 2 only (Park et al. conversation starters). Round 3 is left out
         # of the run but its code is kept; add 3 back here and in eval-data.
         round_number: [2]
-        # On Azure the model name is the deployment name. gpt-5.3-chat-latest
-        # is not deployed on the Azure resource, so it is left out until it is.
+        # On Azure the model name is the deployment name. Only the model the
+        # Elderbot backend runs is tested (BAN-1410).
         chat_model:
-          - gpt-4o-2024-08-06
+          - gpt-5.5-2026-04-23
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,6 +112,7 @@ jobs:
 
   eval-data:
     runs-on: ${{ vars.RUNNER == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
+    timeout-minutes: 720
     permissions:
       contents: read
     needs: gen-data
@@ -150,7 +155,7 @@ jobs:
           LLM_JUDGE_MODEL: ${{ vars.LLM_JUDGE_MODEL }}
           LLM_JUDGE_API_KEY: ${{ secrets.LLM_JUDGE_API_KEY }}
           LLM_JUDGE_MAX_FAILED_SHARE: ${{ vars.LLM_JUDGE_MAX_FAILED_SHARE }}
-        timeout-minutes: 1440
+        timeout-minutes: 690
         run: |
           poetry run python evaluate_dataset.py --round-number=${{ matrix.round_number }}
 
@@ -166,10 +171,13 @@ jobs:
 
       - name: Setup Google Drive credentials
         uses: ./.github/actions/setup-gdrive # zizmor: ignore[self-repository] -- actionlint rejects $/ syntax
+        # Also when the KTB judge step fails, so the day's ratings reach Drive.
+        if: ${{ !cancelled() }}
         with:
           credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
 
       - name: Upload evaluation results to Google Drive
+        if: ${{ !cancelled() }}
         env:
           GOOGLE_DRIVE_SHARED_DRIVE_ID: ${{ vars.GOOGLE_DRIVE_SHARED_DRIVE_ID }}
         run: |
